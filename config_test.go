@@ -50,13 +50,16 @@ func TestAddAndSyncAll(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
-	// add takes an initial backup, so latest.txt and one version exist.
-	if _, err := os.Stat(filepath.Join(target, latestFile)); err != nil {
-		t.Fatalf("add did not create %s: %v", latestFile, err)
+	// add is pure config: it doesn't touch the target, and the id is empty.
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("add should not create the target, stat err = %v", err)
 	}
-	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
-	if len(bundles) != 1 {
-		t.Fatalf("after add: got %d bundles, want 1", len(bundles))
+	cfg, _, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Sync) != 1 || cfg.Sync[0].ID != "" {
+		t.Fatalf("expected one entry with empty id, got %+v", cfg.Sync)
 	}
 
 	// Adding the same pair again is rejected.
@@ -64,13 +67,48 @@ func TestAddAndSyncAll(t *testing.T) {
 		t.Fatal("expected duplicate add to fail")
 	}
 
-	// sync-all appends another version to the configured entry.
+	// First sync initializes the target, backs up, and records the id.
 	if err := syncAll(); err != nil {
 		t.Fatalf("syncAll: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(target, latestFile)); err != nil {
+		t.Fatalf("first sync did not create %s: %v", latestFile, err)
+	}
+	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	if len(bundles) != 1 {
+		t.Fatalf("after first sync: got %d bundles, want 1", len(bundles))
+	}
+	cfg, _, err = loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync[0].ID == "" {
+		t.Fatal("first sync did not record the target id")
+	}
+
+	// A second sync appends another version.
+	if err := syncAll(); err != nil {
+		t.Fatalf("syncAll 2: %v", err)
+	}
 	bundles, _ = filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
 	if len(bundles) != 2 {
-		t.Fatalf("after sync: got %d bundles, want 2", len(bundles))
+		t.Fatalf("after second sync: got %d bundles, want 2", len(bundles))
+	}
+}
+
+func TestSyncAllFirstSyncParentAbsent(t *testing.T) {
+	useTempConfig(t)
+	// Parent dir does not exist -> treated as absent (e.g. drive not mounted),
+	// not an error, and nothing is created.
+	cfg := &config{Sync: []syncEntry{{
+		Source: initRepo(t),
+		Target: filepath.Join(t.TempDir(), "nope", "backup"),
+	}}}
+	if err := saveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncAll(); err != nil {
+		t.Fatalf("absent parent should be skipped, got %v", err)
 	}
 }
 

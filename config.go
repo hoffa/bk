@@ -8,13 +8,14 @@ import (
 	"path/filepath"
 )
 
-// syncEntry is one configured backup: a source repo, a target backup dir, and
-// the id the target's BK_BACKUP.json is expected to have. The id is matched at
-// sync time so we never write into the wrong or a replaced target.
+// syncEntry is one configured backup: a source repo and a target backup dir.
+// ID is empty until the first sync, which initializes the target and records
+// its BK_BACKUP.json id (trust on first use). Later syncs match against it so
+// we never write into a wrong or replaced target.
 type syncEntry struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
-	ID     string `json:"id"`
+	ID     string `json:"id,omitempty"`
 }
 
 type config struct {
@@ -92,13 +93,25 @@ func syncAll() error {
 	}
 
 	var failed int
-	for _, e := range cfg.Sync {
+	var dirty bool
+	for i := range cfg.Sync {
+		e := &cfg.Sync[i]
+		hadID := e.ID != ""
 		switch err := syncConfigured(e); {
 		case errors.Is(err, errTargetAbsent):
 			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
 		case err != nil:
 			fmt.Fprintf(os.Stderr, "error %s -> %s: %v\n", e.Source, e.Target, err)
 			failed++
+		default:
+			if !hadID && e.ID != "" {
+				dirty = true // first sync recorded the target's id
+			}
+		}
+	}
+	if dirty {
+		if err := saveConfig(cfg); err != nil {
+			return fmt.Errorf("save config: %w", err)
 		}
 	}
 	if failed > 0 {
@@ -107,25 +120,45 @@ func syncAll() error {
 	return nil
 }
 
-// syncConfigured verifies a target is present and has the expected id, then
-// syncs the entry.
-func syncConfigured(e syncEntry) error {
+// syncConfigured syncs one entry. On the first sync (empty id) it initializes
+// the target and records its id; afterwards it verifies the target's id matches
+// before syncing. A target that isn't present is reported as errTargetAbsent.
+func syncConfigured(e *syncEntry) error {
 	target, err := filepath.Abs(e.Target)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
-		return errTargetAbsent
-	} else if err != nil {
-		return err
-	}
 
-	meta, err := loadBackupMeta(target)
-	if err != nil {
-		return fmt.Errorf("not a valid backup: %w", err)
-	}
-	if meta.ID != e.ID {
-		return fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
+	if e.ID == "" {
+		// First sync: the parent (e.g. a mount point) must exist so we create
+		// the backup on the intended volume, not somewhere a missing mount used
+		// to be.
+		if _, err := os.Stat(filepath.Dir(target)); errors.Is(err, os.ErrNotExist) {
+			return errTargetAbsent
+		} else if err != nil {
+			return err
+		}
+		if err := initBackup(target); err != nil {
+			return err
+		}
+		meta, err := loadBackupMeta(target)
+		if err != nil {
+			return err
+		}
+		e.ID = meta.ID
+	} else {
+		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+			return errTargetAbsent
+		} else if err != nil {
+			return err
+		}
+		meta, err := loadBackupMeta(target)
+		if err != nil {
+			return fmt.Errorf("not a valid backup: %w", err)
+		}
+		if meta.ID != e.ID {
+			return fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
+		}
 	}
 
 	return syncBackup(e.Source, target)

@@ -61,22 +61,15 @@ func addCmd(args []string) error {
 		}
 	}
 
-	if err := initBackup(target); err != nil {
-		return err
-	}
-	meta, err := loadBackupMeta(target)
-	if err != nil {
-		return err
-	}
-
-	cfg.Sync = append(cfg.Sync, syncEntry{Source: source, Target: target, ID: meta.ID})
+	// Pure config: the target is initialized on first sync, so it need not be
+	// present now.
+	cfg.Sync = append(cfg.Sync, syncEntry{Source: source, Target: target})
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("added %s -> %s (id %s)\n", source, target, meta.ID)
 
-	// Take an initial backup so the target is immediately restorable.
-	return syncBackup(source, target)
+	fmt.Printf("added %s -> %s (run 'bk sync' to back up)\n", source, target)
+	return nil
 }
 
 func restoreCmd(args []string) error {

@@ -21,23 +21,24 @@ Or download a [prebuilt binary](https://github.com/hoffa/bk/releases/latest).
 
 ## Usage
 
-Register a repository and a backup directory (this also takes the first
-backup, so the target is immediately restorable):
+Register a repository and a backup directory. This only edits the config;
+the target doesn't need to exist yet (e.g. an unplugged drive):
 
 ```sh
 bk add ~/code/my-repo /Volumes/usb/my-repo
 ```
 
-Later, back up everything you've registered:
+Back up everything you've registered:
 
 ```sh
 bk sync
 ```
 
-`bk sync` backs up every configured pair. Each sync appends a new, verified
-bundle; existing versions are never overwritten. Targets that aren't present
-(e.g. an unplugged drive) are skipped, and each target is checked against the
-id recorded at `add` time so a wrong or replaced target is never written to.
+`bk sync` backs up every configured pair. The first sync initializes the
+target and records its id; later syncs verify that id, so a wrong or replaced
+target is never written to. Targets that aren't present (e.g. an unplugged
+drive) are skipped. Each sync appends a new, verified bundle; existing
+versions are never overwritten.
 
 Restore the latest version into a new directory:
 
@@ -57,6 +58,8 @@ bk restore /Volumes/usb/my-repo ~/code/restored
   ]
 }
 ```
+
+`id` is empty until the first sync, which fills it in from the target.
 
 ## Layout
 
