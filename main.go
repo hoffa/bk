@@ -1,10 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 )
+
+// errUsage signals a usage error: the message has already been printed and the
+// process should exit with status 2.
+var errUsage = errors.New("usage")
 
 func usage() {
 	fmt.Fprint(os.Stderr, `usage: bk <command> <args>
@@ -21,7 +26,7 @@ func syncCmd(args []string) error {
 
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: bk sync <repo-path> <backup-dir>")
-		os.Exit(2)
+		return errUsage
 	}
 	return syncBackup(fs.Arg(0), fs.Arg(1))
 }
@@ -32,31 +37,38 @@ func restoreCmd(args []string) error {
 
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: bk restore <backup-dir> <restore-path>")
-		os.Exit(2)
+		return errUsage
 	}
 	return restoreBackup(fs.Arg(0), fs.Arg(1))
 }
 
-func main() {
-	if len(os.Args) < 2 {
+// run dispatches a command and returns an error; errUsage means usage was
+// already printed.
+func run(args []string) error {
+	if len(args) < 1 {
 		usage()
-		os.Exit(2)
+		return errUsage
 	}
 
-	cmd, args := os.Args[1], os.Args[2:]
-
-	var err error
+	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "sync":
-		err = syncCmd(args)
+		return syncCmd(rest)
 	case "restore":
-		err = restoreCmd(args)
+		return restoreCmd(rest)
 	default:
 		usage()
-		os.Exit(2)
+		return errUsage
 	}
+}
 
-	if err != nil {
+func main() {
+	err := run(os.Args[1:])
+	switch {
+	case err == nil:
+	case errors.Is(err, errUsage):
+		os.Exit(2)
+	default:
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
