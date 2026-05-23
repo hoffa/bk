@@ -23,7 +23,7 @@ func verifyBundle(bundlePath string) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	if out, err := exec.Command("git", "init", "-q", tmp).CombinedOutput(); err != nil {
 		return fmt.Errorf("git init for verify: %w\n%s", err, out)

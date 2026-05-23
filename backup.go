@@ -52,16 +52,16 @@ func syncBackup(repoPath, backupDir string) error {
 	// Write + verify the bundle under a temp name first so a partial or corrupt
 	// bundle never appears under its final name (or gets referenced below).
 	if err := createBundle(repoPath, tmpBundle); err != nil {
-		os.Remove(tmpBundle)
+		_ = os.Remove(tmpBundle)
 		return err
 	}
 	sum, err := sha256File(tmpBundle)
 	if err != nil {
-		os.Remove(tmpBundle)
+		_ = os.Remove(tmpBundle)
 		return err
 	}
 	if err := os.Rename(tmpBundle, bundlePath); err != nil {
-		os.Remove(tmpBundle)
+		_ = os.Remove(tmpBundle)
 		return err
 	}
 
@@ -180,7 +180,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -197,14 +197,14 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	tmp := f.Name()
-	defer os.Remove(tmp) // no-op once the rename succeeds
+	defer func() { _ = os.Remove(tmp) }() // no-op once the rename succeeds
 
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {

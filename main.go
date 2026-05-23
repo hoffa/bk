@@ -17,7 +17,7 @@ commands:
 
 func syncCmd(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
-	fs.Parse(args)
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: bk sync <repo-path> <backup-dir>")
@@ -28,7 +28,7 @@ func syncCmd(args []string) error {
 
 func restoreCmd(args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
-	fs.Parse(args)
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 2 {
 		fmt.Fprintln(os.Stderr, "usage: bk restore <backup-dir> <restore-path>")
