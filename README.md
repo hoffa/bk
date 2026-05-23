@@ -17,6 +17,8 @@ Or with Go:
 go install github.com/hoffa/bk@latest
 ```
 
+Or download a [prebuilt binary](https://github.com/hoffa/bk/releases/latest).
+
 ## Usage
 
 Back up a repository into a backup directory:
