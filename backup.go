@@ -19,23 +19,22 @@ const (
 	versionsDir    = "versions"
 )
 
-// backupMeta is the content of BK_BACKUP.json: a stable opaque id (for
-// auto-discovery of backups on mounted volumes) and a human-friendly name.
+// backupMeta is the content of BK_BACKUP.json: a stable opaque id, used as a
+// sentinel for auto-discovery of backups on mounted volumes.
 type backupMeta struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID string `json:"id"`
 }
 
 // syncBackup creates a new full bundle of repoPath and appends it to the backup
 // at backupDir. It never overwrites existing versions: a uniquely-named bundle
 // and its sha256 sidecar are written, then latest.txt is atomically updated to
 // point at the new bundle. The backup is initialized on first sync.
-func syncBackup(repoPath, backupDir, name string) error {
+func syncBackup(repoPath, backupDir string) error {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
 		return err
 	}
-	if err := initBackup(backupDir, name); err != nil {
+	if err := initBackup(backupDir); err != nil {
 		return err
 	}
 
@@ -89,8 +88,7 @@ func restoreBackup(backupDir, restorePath string) error {
 	if err != nil {
 		return err
 	}
-	meta, err := loadBackupMeta(backupDir)
-	if err != nil {
+	if _, err := loadBackupMeta(backupDir); err != nil {
 		return fmt.Errorf("not a backup directory (%s): %w", backupDir, err)
 	}
 
@@ -120,14 +118,14 @@ func restoreBackup(backupDir, restorePath string) error {
 		return err
 	}
 
-	fmt.Printf("restored %q (%s) -> %s\n", meta.Name, rel, restorePath)
+	fmt.Printf("restored %s -> %s\n", rel, restorePath)
 	return nil
 }
 
 // initBackup ensures backupDir is an initialized backup: it creates versions/
 // and, if BK_BACKUP.json is absent, writes one with a fresh id. An existing
 // sentinel is left untouched so the id is stable across syncs.
-func initBackup(dir, name string) error {
+func initBackup(dir string) error {
 	if err := os.MkdirAll(filepath.Join(dir, versionsDir), 0755); err != nil {
 		return err
 	}
@@ -143,10 +141,7 @@ func initBackup(dir, name string) error {
 	if err != nil {
 		return err
 	}
-	if name == "" {
-		name = filepath.Base(dir)
-	}
-	data, err := json.MarshalIndent(backupMeta{ID: id, Name: name}, "", "  ")
+	data, err := json.MarshalIndent(backupMeta{ID: id}, "", "  ")
 	if err != nil {
 		return err
 	}
