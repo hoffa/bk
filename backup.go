@@ -15,7 +15,7 @@ import (
 
 const (
 	backupSentinel = "BK_BACKUP.json"
-	latestFile     = "latest.txt"
+	latestFile     = "latest.json"
 	versionsDir    = "versions"
 )
 
@@ -25,10 +25,42 @@ type backupMeta struct {
 	ID string `json:"id"`
 }
 
+// latestMeta is the content of latest.json: a pointer to the current version
+// plus the refs fingerprint it captured, used to skip a sync when nothing has
+// changed.
+type latestMeta struct {
+	Path     string    `json:"path"`
+	RefsHash string    `json:"refs_hash"`
+	SyncedAt time.Time `json:"synced_at"`
+}
+
+// readLatest reads latest.json from backupDir.
+func readLatest(backupDir string) (*latestMeta, error) {
+	data, err := os.ReadFile(filepath.Join(backupDir, latestFile))
+	if err != nil {
+		return nil, err
+	}
+	var l latestMeta
+	if err := json.Unmarshal(data, &l); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", latestFile, err)
+	}
+	return &l, nil
+}
+
+// writeLatest atomically writes latest.json to backupDir.
+func writeLatest(backupDir string, l latestMeta) error {
+	data, err := json.MarshalIndent(l, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(filepath.Join(backupDir, latestFile), append(data, '\n'), 0644)
+}
+
 // syncBackup creates a new full bundle of repoPath and appends it to the backup
 // at backupDir. It never overwrites existing versions: a uniquely-named bundle
-// and its sha256 sidecar are written, then latest.txt is atomically updated to
-// point at the new bundle. The backup is initialized on first sync.
+// and its sha256 sidecar are written, then latest.json is atomically updated to
+// point at the new bundle. The backup is initialized on first sync. If the
+// repo's refs are unchanged since the last sync, it does nothing.
 func syncBackup(repoPath, backupDir string) error {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
@@ -36,6 +68,15 @@ func syncBackup(repoPath, backupDir string) error {
 	}
 	if err := initBackup(backupDir); err != nil {
 		return err
+	}
+
+	refsHash, err := repoRefsHash(repoPath)
+	if err != nil {
+		return err
+	}
+	if prev, err := readLatest(backupDir); err == nil && prev.RefsHash == refsHash {
+		fmt.Printf("up to date: %s\n", repoPath)
+		return nil
 	}
 
 	// Unique, sortable name: UTC timestamp + random suffix to avoid collisions
@@ -65,7 +106,7 @@ func syncBackup(repoPath, backupDir string) error {
 		return err
 	}
 
-	// Sidecar before latest.txt; latest.txt is updated last so it only ever
+	// Sidecar before latest.json; latest.json is updated last so it only ever
 	// points at a fully-written, verified bundle with a complete sidecar.
 	sidecar := fmt.Sprintf("%s  %s\n", sum, base)
 	if err := atomicWriteFile(bundlePath+".sha256", []byte(sidecar), 0644); err != nil {
@@ -73,7 +114,11 @@ func syncBackup(repoPath, backupDir string) error {
 	}
 
 	rel := filepath.ToSlash(filepath.Join(versionsDir, base))
-	if err := atomicWriteFile(filepath.Join(backupDir, latestFile), []byte(rel+"\n"), 0644); err != nil {
+	if err := writeLatest(backupDir, latestMeta{
+		Path:     rel,
+		RefsHash: refsHash,
+		SyncedAt: time.Now().UTC(),
+	}); err != nil {
 		return err
 	}
 
@@ -92,11 +137,11 @@ func restoreBackup(backupDir, restorePath string) error {
 		return fmt.Errorf("not a backup directory (%s): %w", backupDir, err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(backupDir, latestFile))
+	latest, err := readLatest(backupDir)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", latestFile, err)
 	}
-	rel := strings.TrimSpace(string(data))
+	rel := latest.Path
 	if rel == "" {
 		return fmt.Errorf("no versions found in backup %s", backupDir)
 	}

@@ -1,11 +1,28 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+// repoRefsHash returns a fingerprint of all the repo's refs (object name +
+// ref name for every ref). It changes whenever any ref a --all bundle would
+// capture changes, so it can be used to skip a sync when nothing has changed:
+// matching fingerprints mean identical refs, hence an identical bundle.
+func repoRefsHash(repoPath string) (string, error) {
+	cmd := exec.Command("git", "for-each-ref", "--format=%(objectname) %(refname)")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git for-each-ref: %w", err)
+	}
+	sum := sha256.Sum256(out)
+	return hex.EncodeToString(sum[:]), nil
+}
 
 // verifyBundle checks that the bundle at bundlePath is a valid git bundle.
 //
@@ -40,7 +57,7 @@ func verifyBundle(bundlePath string) error {
 // createBundle creates a git bundle from the repo at repoPath, writing it to
 // bundlePath, and then verifies the resulting bundle.
 func createBundle(repoPath, bundlePath string) error {
-	create := exec.Command("git", "bundle", "create", "--version=2", bundlePath, "--all")
+	create := exec.Command("git", "bundle", "create", bundlePath, "--all")
 	create.Dir = repoPath
 	if out, err := create.CombinedOutput(); err != nil {
 		return fmt.Errorf("git bundle create: %w\n%s", err, out)

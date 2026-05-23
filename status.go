@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -72,37 +71,18 @@ func entryStatus(e syncEntry) backupStatus {
 	s.state = stateOK
 	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
 	s.versions = len(bundles)
-	if data, err := os.ReadFile(filepath.Join(target, latestFile)); err == nil {
-		if t, ok := bundleTime(strings.TrimSpace(string(data))); ok {
-			s.lastSync = t
-		}
+	if l, err := readLatest(target); err == nil {
+		s.lastSync = l.SyncedAt
 	}
 	return s
 }
 
-// bundleTime extracts the sync time encoded in a bundle name of the form
-// bk-<timestamp>-<rand>.bundle.
-func bundleTime(name string) (time.Time, bool) {
-	base := strings.TrimSuffix(filepath.Base(name), ".bundle")
-	base = strings.TrimPrefix(base, "bk-")
-	i := strings.LastIndex(base, "-")
-	if i < 0 {
-		return time.Time{}, false
+// short returns the first n characters of s.
+func short(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
 	}
-	t, err := time.Parse("20060102T150405Z", base[:i])
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
-}
-
-// shortID returns the displayed prefix of an id.
-func shortID(id string) string {
-	const n = 12
-	if len(id) > n {
-		return id[:n]
-	}
-	return id
+	return s
 }
 
 // printStatus renders entry statuses as an aligned table.
@@ -113,7 +93,7 @@ func printStatus(w io.Writer, statuses []backupStatus) error {
 	for _, s := range statuses {
 		id, versions, last := "-", "-", "-"
 		if s.ID != "" {
-			id = shortID(s.ID)
+			id = short(s.ID, 12)
 		}
 		if s.state == stateOK {
 			versions = strconv.Itoa(s.versions)

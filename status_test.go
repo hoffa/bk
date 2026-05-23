@@ -106,15 +106,11 @@ func TestPrintStatus(t *testing.T) {
 	}
 }
 
-func TestBundleTime(t *testing.T) {
-	tm, ok := bundleTime("versions/bk-20260523T092657Z-fb34bd.bundle")
-	if !ok {
-		t.Fatal("expected to parse bundle time")
+func TestShort(t *testing.T) {
+	if got := short("abcdefgh", 3); got != "abc" {
+		t.Errorf("short = %q, want abc", got)
 	}
-	if got := tm.Format("2006-01-02 15:04:05Z"); got != "2026-05-23 09:26:57Z" {
-		t.Fatalf("parsed %q, want 2026-05-23 09:26:57Z", got)
-	}
-	if _, ok := bundleTime("garbage.bundle"); ok {
-		t.Error("expected failure on malformed name")
+	if got := short("ab", 5); got != "ab" {
+		t.Errorf("short = %q, want ab", got)
 	}
 }

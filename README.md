@@ -74,15 +74,17 @@ A backup is a plain directory using only appends and atomic overwrites:
 ```
 backup/
   BK_BACKUP.json          sentinel + opaque id
-  latest.txt              relative path of the current version
+  latest.json             current version + refs fingerprint (path, refs_hash, synced_at)
   versions/
     bk-<timestamp>-<rand>.bundle
     bk-<timestamp>-<rand>.bundle.sha256
     ...
 ```
 
-`latest.txt` is updated last and only ever points at a fully written,
+`latest.json` is written last and only ever points at a fully written,
 verified bundle, so interrupted or concurrent syncs can't corrupt a backup.
+It also records a fingerprint of the repo's refs, so a sync with no changes
+is a fast no-op.
 
 Note: bundles capture committed refs only — no working tree, stash, or
 untracked files.
