@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,18 +50,27 @@ func TestAddAndSyncAll(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 
+	// add takes an initial backup, so latest.txt and one version exist.
+	if _, err := os.Stat(filepath.Join(target, latestFile)); err != nil {
+		t.Fatalf("add did not create %s: %v", latestFile, err)
+	}
+	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	if len(bundles) != 1 {
+		t.Fatalf("after add: got %d bundles, want 1", len(bundles))
+	}
+
 	// Adding the same pair again is rejected.
 	if err := addCmd([]string{repo, target}); err == nil {
 		t.Fatal("expected duplicate add to fail")
 	}
 
-	// sync-all backs up the configured entry.
+	// sync-all appends another version to the configured entry.
 	if err := syncAll(); err != nil {
 		t.Fatalf("syncAll: %v", err)
 	}
-	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
-	if len(bundles) != 1 {
-		t.Fatalf("got %d bundles, want 1", len(bundles))
+	bundles, _ = filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	if len(bundles) != 2 {
+		t.Fatalf("after sync: got %d bundles, want 2", len(bundles))
 	}
 }
 

@@ -21,13 +21,14 @@ Or download a [prebuilt binary](https://github.com/hoffa/bk/releases/latest).
 
 ## Usage
 
-Register a repository and a backup directory:
+Register a repository and a backup directory (this also takes the first
+backup, so the target is immediately restorable):
 
 ```sh
 bk add ~/code/my-repo /Volumes/usb/my-repo
 ```
 
-Then back up everything you've registered:
+Later, back up everything you've registered:
 
 ```sh
 bk sync

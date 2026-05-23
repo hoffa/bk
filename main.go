@@ -51,14 +51,6 @@ func addCmd(args []string) error {
 		return err
 	}
 
-	if err := initBackup(target); err != nil {
-		return err
-	}
-	meta, err := loadBackupMeta(target)
-	if err != nil {
-		return err
-	}
-
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return err
@@ -68,13 +60,23 @@ func addCmd(args []string) error {
 			return fmt.Errorf("already configured: %s -> %s", source, target)
 		}
 	}
+
+	if err := initBackup(target); err != nil {
+		return err
+	}
+	meta, err := loadBackupMeta(target)
+	if err != nil {
+		return err
+	}
+
 	cfg.Sync = append(cfg.Sync, syncEntry{Source: source, Target: target, ID: meta.ID})
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-
 	fmt.Printf("added %s -> %s (id %s)\n", source, target, meta.ID)
-	return nil
+
+	// Take an initial backup so the target is immediately restorable.
+	return syncBackup(source, target)
 }
 
 func restoreCmd(args []string) error {
