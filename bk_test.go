@@ -254,6 +254,32 @@ func TestAtomicWriteFile(t *testing.T) {
 	}
 }
 
+func TestNewUUID(t *testing.T) {
+	id, err := newUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 8-4-4-4-12 layout.
+	parts := strings.Split(id, "-")
+	if len(parts) != 5 {
+		t.Fatalf("uuid %q: want 5 dash-separated groups, got %d", id, len(parts))
+	}
+	for i, n := range []int{8, 4, 4, 4, 12} {
+		if len(parts[i]) != n {
+			t.Fatalf("uuid %q: group %d len %d, want %d", id, i, len(parts[i]), n)
+		}
+	}
+	if parts[2][0] != '4' {
+		t.Errorf("uuid %q: version nibble = %c, want 4", id, parts[2][0])
+	}
+	if c := parts[3][0]; c != '8' && c != '9' && c != 'a' && c != 'b' {
+		t.Errorf("uuid %q: variant nibble = %c, want one of 89ab", id, c)
+	}
+	if other, _ := newUUID(); other == id {
+		t.Fatal("newUUID returned identical values")
+	}
+}
+
 func TestRandHex(t *testing.T) {
 	s, err := randHex(8)
 	if err != nil {
