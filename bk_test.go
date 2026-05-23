@@ -126,11 +126,11 @@ func TestRestoreShaMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rel, err := os.ReadFile(filepath.Join(backup, latestFile))
+	latest, err := readLatest(backup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle := filepath.Join(backup, strings.TrimSpace(string(rel)))
+	bundle := filepath.Join(backup, latest.Path)
 	if err := os.WriteFile(bundle, []byte("corrupt"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -167,10 +167,10 @@ func TestRestoreNoVersions(t *testing.T) {
 	if err := initBackup(backup); err != nil {
 		t.Fatal(err)
 	}
-	// No latest.txt written yet.
+	// No latest.json written yet.
 	err := restoreBackup(backup, filepath.Join(t.TempDir(), "restored"))
-	if err == nil || !strings.Contains(err.Error(), "latest.txt") {
-		t.Fatalf("want missing latest.txt error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "latest.json") {
+		t.Fatalf("want missing latest.json error, got %v", err)
 	}
 }
 

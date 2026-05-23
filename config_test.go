@@ -86,13 +86,35 @@ func TestAddAndSyncAll(t *testing.T) {
 		t.Fatal("first sync did not record the target id")
 	}
 
-	// A second sync appends another version.
+	// A second sync after a new commit appends another version.
+	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 	if err := syncAll(); err != nil {
 		t.Fatalf("syncAll 2: %v", err)
 	}
 	bundles, _ = filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
 	if len(bundles) != 2 {
 		t.Fatalf("after second sync: got %d bundles, want 2", len(bundles))
+	}
+}
+
+func TestSyncSkipsWhenUnchanged(t *testing.T) {
+	useTempConfig(t)
+	repo := initRepo(t)
+	target := filepath.Join(t.TempDir(), "backup")
+	if err := addCmd([]string{repo, target}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := syncAll(); err != nil {
+		t.Fatal(err)
+	}
+	// No repo changes -> second sync is a no-op, no new version.
+	if err := syncAll(); err != nil {
+		t.Fatal(err)
+	}
+	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	if len(bundles) != 1 {
+		t.Fatalf("unchanged repo should not add a version, got %d", len(bundles))
 	}
 }
 
