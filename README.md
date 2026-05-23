@@ -40,6 +40,12 @@ target is never written to. Targets that aren't present (e.g. an unplugged
 drive) are skipped. Each sync appends a new, verified bundle; existing
 versions are never overwritten.
 
+See the state of every configured backup:
+
+```sh
+bk status
+```
+
 Restore the latest version into a new directory:
 
 ```sh

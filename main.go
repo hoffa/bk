@@ -18,8 +18,29 @@ func usage() {
 commands:
   add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config
   sync                                  sync all configured backups
+  status                                show the state of every configured backup
   restore <backup-dir> <restore-path>   restore a backup's latest version
 `)
+}
+
+func statusCmd(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: bk status")
+		return errUsage
+	}
+
+	statuses, err := statusAll()
+	if err != nil {
+		return err
+	}
+	if len(statuses) == 0 {
+		fmt.Println("no backups configured; add one with: bk add <repo> <backup-dir>")
+		return nil
+	}
+	return printStatus(os.Stdout, statuses)
 }
 
 func syncCmd(args []string) error {
@@ -97,6 +118,8 @@ func run(args []string) error {
 		return syncCmd(rest)
 	case "add":
 		return addCmd(rest)
+	case "status":
+		return statusCmd(rest)
 	case "restore":
 		return restoreCmd(rest)
 	default:
