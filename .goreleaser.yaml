@@ -1,0 +1,21 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+
+homebrew_casks:
+  - repository:
+      owner: hoffa
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/hoffa/bk
+    description: Versioned git repository backups using append-only bundles
+    url:
+      verified: github.com/hoffa/bk
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bk"]
+          end
