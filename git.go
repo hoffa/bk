@@ -4,11 +4,33 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // verifyBundle checks that the bundle at bundlePath is a valid git bundle.
+//
+// "git bundle verify" must run inside a git repository, even for a
+// self-contained bundle with no prerequisites, so it runs in a throwaway empty
+// repo. This keeps verification self-contained and usable when no source repo
+// is available (e.g. before a restore).
 func verifyBundle(bundlePath string) error {
-	verify := exec.Command("git", "bundle", "verify", bundlePath)
+	abs, err := filepath.Abs(bundlePath)
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.MkdirTemp("", "bk-verify-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+
+	if out, err := exec.Command("git", "init", "-q", tmp).CombinedOutput(); err != nil {
+		return fmt.Errorf("git init for verify: %w\n%s", err, out)
+	}
+
+	verify := exec.Command("git", "bundle", "verify", abs)
+	verify.Dir = tmp
 	if out, err := verify.CombinedOutput(); err != nil {
 		return fmt.Errorf("git bundle verify: %w\n%s", err, out)
 	}
