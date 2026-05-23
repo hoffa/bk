@@ -20,6 +20,10 @@ func TestMain(m *testing.M) {
 	}
 	bkBin = filepath.Join(dir, "bk")
 
+	// Safety net: keep all tests off the real ~/.config/bk; individual tests
+	// may still override BK_CONFIG via t.Setenv.
+	_ = os.Setenv("BK_CONFIG", filepath.Join(dir, "config.json"))
+
 	build := exec.Command("go", "build", "-o", bkBin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
@@ -49,12 +53,21 @@ func runBin(t *testing.T, args ...string) (string, int) {
 }
 
 func TestE2E(t *testing.T) {
+	// Isolate the config; the subprocess inherits this env.
+	t.Setenv("BK_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 	restore := filepath.Join(t.TempDir(), "restored")
 
+	t.Run("add ok", func(t *testing.T) {
+		if out, code := runBin(t, "add", repo, backup); code != 0 {
+			t.Fatalf("exit %d, want 0\n%s", code, out)
+		}
+	})
+
 	t.Run("sync ok", func(t *testing.T) {
-		if out, code := runBin(t, "sync", repo, backup); code != 0 {
+		if out, code := runBin(t, "sync"); code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)
 		}
 	})
@@ -94,7 +107,7 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("too few args is usage", func(t *testing.T) {
+	t.Run("sync with args is usage", func(t *testing.T) {
 		if _, code := runBin(t, "sync", repo); code != 2 {
 			t.Fatalf("exit %d, want 2", code)
 		}

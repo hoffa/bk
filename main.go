@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // errUsage signals a usage error: the message has already been printed and the
@@ -15,20 +16,67 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: bk <command> <args>
 
 commands:
-  sync <repo-path> <backup-dir>         back up a repo into a versioned backup dir
+  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config
+  sync                                  sync all configured backups
   restore <backup-dir> <restore-path>   restore a backup's latest version
 `)
 }
 
 func syncCmd(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
+	fs.StringVar(&configOverride, "config", configOverride, "path to config file")
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: bk sync [-config <path>]")
+		return errUsage
+	}
+	return syncAll()
+}
+
+func addCmd(args []string) error {
+	fs := flag.NewFlagSet("add", flag.ExitOnError)
+	fs.StringVar(&configOverride, "config", configOverride, "path to config file")
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: bk sync <repo-path> <backup-dir>")
+		fmt.Fprintln(os.Stderr, "usage: bk add [-config <path>] <repo-path> <backup-dir>")
 		return errUsage
 	}
-	return syncBackup(fs.Arg(0), fs.Arg(1))
+
+	source, err := filepath.Abs(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	target, err := filepath.Abs(fs.Arg(1))
+	if err != nil {
+		return err
+	}
+
+	if err := initBackup(target); err != nil {
+		return err
+	}
+	meta, err := loadBackupMeta(target)
+	if err != nil {
+		return err
+	}
+
+	cfg, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	for _, e := range cfg.Sync {
+		if e.Source == source && e.Target == target {
+			return fmt.Errorf("already configured: %s -> %s", source, target)
+		}
+	}
+	cfg.Sync = append(cfg.Sync, syncEntry{Source: source, Target: target, ID: meta.ID})
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("added %s -> %s (id %s)\n", source, target, meta.ID)
+	return nil
 }
 
 func restoreCmd(args []string) error {
@@ -54,6 +102,8 @@ func run(args []string) error {
 	switch cmd {
 	case "sync":
 		return syncCmd(rest)
+	case "add":
+		return addCmd(rest)
 	case "restore":
 		return restoreCmd(rest)
 	default:

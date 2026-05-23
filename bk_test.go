@@ -267,10 +267,15 @@ func TestRandHex(t *testing.T) {
 	}
 }
 
-func TestRunSyncRestore(t *testing.T) {
+func TestRunAddSyncRestore(t *testing.T) {
+	useTempConfig(t)
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
-	if err := run([]string{"sync", repo, backup}); err != nil {
+
+	if err := run([]string{"add", repo, backup}); err != nil {
+		t.Fatalf("run add: %v", err)
+	}
+	if err := run([]string{"sync"}); err != nil {
 		t.Fatalf("run sync: %v", err)
 	}
 	restore := filepath.Join(t.TempDir(), "restored")
@@ -286,7 +291,6 @@ func TestRunUsageErrors(t *testing.T) {
 	cases := [][]string{
 		{},                      // no command
 		{"bogus"},               // unknown command
-		{"sync"},                // too few args
 		{"sync", "a"},           // too few args
 		{"restore", "a"},        // too few args
 		{"sync", "a", "b", "c"}, // too many args

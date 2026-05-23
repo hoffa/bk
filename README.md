@@ -21,17 +21,40 @@ Or download a [prebuilt binary](https://github.com/hoffa/bk/releases/latest).
 
 ## Usage
 
-Back up a repository into a backup directory:
+Register a repository and a backup directory:
 
 ```sh
-bk sync ~/code/my-repo backup
+bk add ~/code/my-repo /Volumes/usb/my-repo
 ```
 
-Each sync appends a new, verified bundle; existing versions are never
-overwritten. Restore the latest version into a new directory:
+Then back up everything you've registered:
 
 ```sh
-bk restore backup ~/code/restored
+bk sync
+```
+
+`bk sync` backs up every configured pair. Each sync appends a new, verified
+bundle; existing versions are never overwritten. Targets that aren't present
+(e.g. an unplugged drive) are skipped, and each target is checked against the
+id recorded at `add` time so a wrong or replaced target is never written to.
+
+Restore the latest version into a new directory:
+
+```sh
+bk restore /Volumes/usb/my-repo ~/code/restored
+```
+
+## Config
+
+`bk add` writes to `~/.config/bk/config.json` (honoring `XDG_CONFIG_HOME`, the
+`BK_CONFIG` env var, or the `-config <path>` flag, in increasing precedence):
+
+```json
+{
+  "sync": [
+    { "source": "/Users/me/code/my-repo", "target": "/Volumes/usb/my-repo", "id": "..." }
+  ]
+}
 ```
 
 ## Layout
