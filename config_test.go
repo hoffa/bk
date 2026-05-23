@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,22 +118,6 @@ func TestSyncAllNotABackupTarget(t *testing.T) {
 	}
 	if err := syncAll(); err == nil {
 		t.Fatal("expected failure for non-backup target")
-	}
-}
-
-func TestConfigFlag(t *testing.T) {
-	t.Setenv("BK_CONFIG", "")
-	defer func() { configOverride = "" }() // the flag mutates this global
-
-	path := filepath.Join(t.TempDir(), "custom.json")
-	repo := initRepo(t)
-	backup := filepath.Join(t.TempDir(), "backup")
-
-	if err := run([]string{"add", "-config", path, repo, backup}); err != nil {
-		t.Fatalf("add -config: %v", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("config not written to -config path: %v", err)
 	}
 }
 

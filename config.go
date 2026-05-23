@@ -24,17 +24,10 @@ type config struct {
 // errTargetAbsent means a target path does not exist, e.g. an unplugged drive.
 var errTargetAbsent = errors.New("target not present")
 
-// configOverride, when non-empty, is the config path set by the -config flag.
-// It takes precedence over the BK_CONFIG env var and the default location.
-var configOverride string
-
-// configPath resolves the global config location: the -config flag overrides
-// everything, then BK_CONFIG, otherwise $XDG_CONFIG_HOME/bk/config.json
-// (default ~/.config).
+// configPath resolves the global config location: BK_CONFIG overrides
+// everything, otherwise $XDG_CONFIG_HOME/bk/config.json (default ~/.config).
+// Override per-invocation with BK_CONFIG=/path bk ...
 func configPath() (string, error) {
-	if configOverride != "" {
-		return configOverride, nil
-	}
 	if p := os.Getenv("BK_CONFIG"); p != "" {
 		return p, nil
 	}

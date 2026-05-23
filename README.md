@@ -46,8 +46,8 @@ bk restore /Volumes/usb/my-repo ~/code/restored
 
 ## Config
 
-`bk add` writes to `~/.config/bk/config.json` (honoring `XDG_CONFIG_HOME`, the
-`BK_CONFIG` env var, or the `-config <path>` flag, in increasing precedence):
+`bk add` writes to `~/.config/bk/config.json` (honoring `XDG_CONFIG_HOME`, or
+`BK_CONFIG=/path` for an explicit file, set per-invocation if needed):
 
 ```json
 {

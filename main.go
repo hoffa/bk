@@ -24,11 +24,10 @@ commands:
 
 func syncCmd(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
-	fs.StringVar(&configOverride, "config", configOverride, "path to config file")
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk sync [-config <path>]")
+		fmt.Fprintln(os.Stderr, "usage: bk sync")
 		return errUsage
 	}
 	return syncAll()
@@ -36,11 +35,10 @@ func syncCmd(args []string) error {
 
 func addCmd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
-	fs.StringVar(&configOverride, "config", configOverride, "path to config file")
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: bk add [-config <path>] <repo-path> <backup-dir>")
+		fmt.Fprintln(os.Stderr, "usage: bk add <repo-path> <backup-dir>")
 		return errUsage
 	}
 
