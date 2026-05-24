@@ -47,7 +47,7 @@ bk status
 ```
 
 Or just run `bk` with no arguments for a live dashboard. Each backup shows a
-colored ⏺ and its last sync time, where the color is *currency* and the
+colored dot and its last sync time, where the color is *currency* and the
 brightness is *connection*:
 
 - green = synced, yellow = out of date, muted = never synced, red = error

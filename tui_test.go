@@ -119,7 +119,7 @@ func TestModelQuit(t *testing.T) {
 func TestModelView(t *testing.T) {
 	m := newModel(status("/src", "/dst", stateSynced))
 	v := m.View()
-	for _, want := range []string{"/src", "/dst", "synced", "⏺", "auto-sync", "q: quit"} {
+	for _, want := range []string{"/src", "/dst", "synced", statusGlyph(), "auto-sync", "q: quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}

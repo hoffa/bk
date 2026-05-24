@@ -126,7 +126,7 @@ func (m tuiModel) View() string {
 	for _, s := range m.statuses {
 		indicator, label := dot(true, s.state, s.present), s.label()
 		if m.syncing[entryKey(s.syncEntry)] {
-			indicator, label = colorize("36", "⏺"), "syncing…" // cyan
+			indicator, label = colorize("36", statusGlyph()), "syncing…" // cyan
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", indicator, s.Source, s.Target, label, relTime(s.lastSync))
 	}

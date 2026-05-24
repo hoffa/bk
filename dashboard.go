@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // dashboard is the `bk` (no args) entry point. On a terminal it runs the live
@@ -25,10 +26,31 @@ func dashboard(w io.Writer) error {
 	return printStatus(w, statuses)
 }
 
+// statusGlyph is the status mark: a filled circle (as used by systemctl), or
+// ASCII when the terminal locale isn't UTF-8. The color carries the meaning, so
+// the exact glyph is cosmetic.
+func statusGlyph() string {
+	if utf8Locale() {
+		return "●"
+	}
+	return "*"
+}
+
+// utf8Locale reports whether the environment advertises a UTF-8 locale.
+func utf8Locale() bool {
+	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if v := os.Getenv(k); v != "" {
+			v = strings.ToUpper(v)
+			return strings.Contains(v, "UTF-8") || strings.Contains(v, "UTF8")
+		}
+	}
+	return false
+}
+
 // dot returns the status indicator, colored when enabled. Color encodes
 // currency; present=false dims it to signal a disconnected target.
 func dot(color bool, s entryState, present bool) string {
-	const c = "⏺"
+	c := statusGlyph()
 	if !color {
 		return c
 	}

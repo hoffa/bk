@@ -8,13 +8,13 @@ import (
 )
 
 func TestDot(t *testing.T) {
-	if got := dot(false, stateSynced, true); got != "⏺" {
-		t.Errorf("no-color dot = %q, want plain ⏺", got)
+	if got := dot(false, stateSynced, true); got != statusGlyph() {
+		t.Errorf("no-color dot = %q, want plain glyph", got)
 	}
 	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateChecking, stateError} {
 		for _, present := range []bool{true, false} {
 			got := dot(true, s, present)
-			if !strings.Contains(got, "⏺") || !strings.Contains(got, "\033[") {
+			if !strings.Contains(got, statusGlyph()) || !strings.Contains(got, "\033[") {
 				t.Errorf("colored dot for %s (present=%v) = %q", s.label(), present, got)
 			}
 		}
@@ -22,6 +22,20 @@ func TestDot(t *testing.T) {
 	// Offline synced is dimmed relative to connected synced.
 	if dot(true, stateSynced, true) == dot(true, stateSynced, false) {
 		t.Error("offline synced dot should differ from connected")
+	}
+}
+
+func TestStatusGlyph(t *testing.T) {
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+
+	t.Setenv("LANG", "en_US.UTF-8")
+	if got := statusGlyph(); got != "●" {
+		t.Errorf("UTF-8 locale glyph = %q, want ●", got)
+	}
+	t.Setenv("LANG", "C")
+	if got := statusGlyph(); got != "*" {
+		t.Errorf("non-UTF-8 locale glyph = %q, want *", got)
 	}
 }
 

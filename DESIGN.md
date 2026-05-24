@@ -2,8 +2,8 @@
 
 ## Status colors
 
-The dashboard shows each backup as a colored `⏺`. Color encodes currency,
-brightness encodes connection:
+The dashboard shows each backup as a colored dot (`●`, or `*` when the locale
+isn't UTF-8). Color encodes currency, brightness encodes connection:
 
 | Color        | Meaning                                                            |
 | ------------ | ----------------------------------------------------------------- |
