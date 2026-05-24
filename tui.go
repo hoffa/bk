@@ -156,7 +156,7 @@ func (m tuiModel) statusBar(bodyLines int) string {
 		mode = "on"
 	}
 	left := "auto-sync: " + mode
-	right := "a: toggle auto-sync    q: quit"
+	right := "a: toggle auto-sync  q: quit"
 
 	gap := m.width - len(left) - len(right)
 	if gap < 2 {
