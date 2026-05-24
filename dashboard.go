@@ -8,7 +8,7 @@ import (
 
 // dashboard is the `bk` (no args) entry point. On a terminal it runs the live
 // watch TUI; otherwise (piped/CI) it prints a one-shot status snapshot.
-// Neither syncs by default — use `bk sync`, or toggle auto-sync in the TUI.
+// Neither syncs by default -- use `bk sync`, or toggle auto-sync in the TUI.
 func dashboard(w io.Writer) error {
 	if isTerminal(w) {
 		return runTUI()
@@ -58,7 +58,7 @@ func badge(color bool, s entryState, present bool) string {
 
 // badgeText renders text left-aligned in a fixed-width badge using the given
 // foreground color plus reverse video, so the color becomes the background and
-// the text is the terminal's own background color — consistent and
+// the text is the terminal's own background color -- consistent and
 // theme-adaptive for every state.
 func badgeText(color bool, ansiColor, text string) string {
 	cell := fmt.Sprintf(" %-*s", badgeWidth-1, text) // leading space, padded right

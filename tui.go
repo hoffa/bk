@@ -23,10 +23,11 @@ func entryKey(e syncEntry) string {
 // syncs out-of-date entries via syncConfigured. All work happens off the UI
 // goroutine via commands.
 type tuiModel struct {
-	statuses []backupStatus
-	syncing  map[string]bool
-	autoSync bool
-	quitting bool
+	statuses      []backupStatus
+	syncing       map[string]bool
+	autoSync      bool
+	quitting      bool
+	width, height int
 }
 
 type (
@@ -63,6 +64,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
 
 	case tickMsg:
 		// Reload config + re-check (picks up entries added elsewhere, plugged-in
@@ -116,33 +121,52 @@ func (m tuiModel) View() string {
 	}
 
 	var b strings.Builder
+	lines := 0
 	if len(m.statuses) == 0 {
 		b.WriteString("no backups configured; add one with: bk add <repo> <backup-dir>\n")
-		return b.String()
-	}
-
-	// Manual column widths from visible text: colored badges contain ANSI
-	// escapes, so tabwriter can't measure them. Badges are a fixed visible
-	// width, so the rest aligns when padded by source/target length.
-	srcW, tgtW := 0, 0
-	for _, s := range m.statuses {
-		srcW = max(srcW, len(s.Source))
-		tgtW = max(tgtW, len(s.Target))
-	}
-	for _, s := range m.statuses {
-		bg := badge(true, s.state, s.present)
-		if m.syncing[entryKey(s.syncEntry)] {
-			bg = badgeText(true, "36", "SYNC") // cyan
+		lines++
+	} else {
+		// Manual column widths from visible text: colored badges contain ANSI
+		// escapes, so tabwriter can't measure them. Badges are a fixed visible
+		// width, so the rest aligns when padded by source/target length.
+		srcW, tgtW := 0, 0
+		for _, s := range m.statuses {
+			srcW = max(srcW, len(s.Source))
+			tgtW = max(tgtW, len(s.Target))
 		}
-		_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
+		for _, s := range m.statuses {
+			bg := badge(true, s.state, s.present)
+			if m.syncing[entryKey(s.syncEntry)] {
+				bg = badgeText(true, "36", "SYNC") // cyan
+			}
+			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
+			lines++
+		}
 	}
 
+	b.WriteString(m.statusBar(lines))
+	return b.String()
+}
+
+// statusBar renders the bottom row: auto-sync state flush-left, help
+// flush-right, padded to the window width and pinned to the last terminal row.
+func (m tuiModel) statusBar(bodyLines int) string {
 	mode := "off"
 	if m.autoSync {
 		mode = "on"
 	}
-	_, _ = fmt.Fprintf(&b, "\nauto-sync: %s  ·  a: toggle auto-sync   q: quit\n", mode)
-	return b.String()
+	left := "auto-sync: " + mode
+	right := "a: toggle auto-sync    q: quit"
+
+	gap := m.width - len(left) - len(right)
+	if gap < 2 {
+		gap = 2
+	}
+	bar := left + strings.Repeat(" ", gap) + right
+
+	// Push the bar to the bottom of the screen when the height is known.
+	blanks := max(1, m.height-bodyLines-1)
+	return strings.Repeat("\n", blanks) + bar
 }
 
 // relTime renders a sync time as a short relative string.
