@@ -132,7 +132,7 @@ func (m tuiModel) View() string {
 	for _, s := range m.statuses {
 		bg := badge(true, s.state, s.present)
 		if m.syncing[entryKey(s.syncEntry)] {
-			bg = badgeText(true, "30;46", "SYNC") // black on cyan
+			bg = badgeText(true, "36", "SYNC") // cyan
 		}
 		_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
 	}

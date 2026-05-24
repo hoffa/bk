@@ -53,30 +53,33 @@ const badgeWidth = 8
 // badge renders a status code as a fixed-width cell, colored as a background
 // badge (like a test runner's PASS/FAIL) when color is enabled.
 func badge(color bool, s entryState, present bool) string {
-	return badgeText(color, bgColor(s), statusCode(s, present))
+	return badgeText(color, badgeColor(s), statusCode(s, present))
 }
 
-// badgeText renders text left-aligned in a fixed-width badge with the given
-// ANSI code (the colored block is the same width for every badge).
-func badgeText(color bool, code, text string) string {
+// badgeText renders text left-aligned in a fixed-width badge using the given
+// foreground color plus reverse video, so the color becomes the background and
+// the text is the terminal's own background color — consistent and
+// theme-adaptive for every state.
+func badgeText(color bool, ansiColor, text string) string {
 	cell := fmt.Sprintf(" %-*s", badgeWidth-1, text) // leading space, padded right
 	if !color {
 		return cell
 	}
-	return "\033[" + code + "m" + cell + "\033[0m"
+	return "\033[" + ansiColor + ";7m" + cell + "\033[0m"
 }
 
-// bgColor is the ANSI attribute (fg;bg) for a state's badge.
-func bgColor(s entryState) string {
+// badgeColor is the ANSI foreground color for a state's badge (reverse video
+// turns it into the background).
+func badgeColor(s entryState) string {
 	switch s {
 	case stateSynced:
-		return "30;42" // black on green
+		return "32" // green
 	case stateStale:
-		return "30;43" // black on yellow
+		return "33" // yellow
 	case stateError:
-		return "97;41" // white on red
+		return "31" // red
 	default: // unsynced, checking
-		return "30;47" // black on grey
+		return "90" // grey
 	}
 }
 
