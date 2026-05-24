@@ -108,7 +108,7 @@ func restoreCmd(args []string) error {
 // already printed.
 func run(args []string) error {
 	if len(args) < 1 {
-		return runDashboard(os.Stdout)
+		return dashboard(os.Stdout)
 	}
 
 	cmd, rest := args[0], args[1:]

@@ -86,6 +86,21 @@ func TestEvalEntryStates(t *testing.T) {
 	}
 }
 
+func TestDashboardNonTTYOneShot(t *testing.T) {
+	useTempConfig(t)
+	// A non-terminal writer must run a single pass (not the watch loop).
+	var buf bytes.Buffer
+	if isTerminal(&buf) {
+		t.Fatal("bytes.Buffer should not be a terminal")
+	}
+	if err := dashboard(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "no backups configured") {
+		t.Fatalf("unexpected output:\n%s", buf.String())
+	}
+}
+
 func TestRunDashboardEmpty(t *testing.T) {
 	useTempConfig(t)
 	var buf bytes.Buffer

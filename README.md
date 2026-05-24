@@ -46,9 +46,12 @@ See the state of every configured backup:
 bk status
 ```
 
-Or just run `bk` with no arguments for a dashboard that shows each backup with
-a colored ⏺ (green = synced, yellow = out of date, muted = never synced, red =
-absent/error) and automatically syncs the ones that need it.
+Or just run `bk` with no arguments for a live dashboard that shows each backup
+with a colored ⏺ (green = synced, yellow = out of date, muted = never synced,
+red = absent/error) and automatically keeps them in sync. It re-checks
+continuously, so plugging in a drive turns its dot from red to green on its
+own. Press `q` to quit. (When output isn't a terminal, `bk` does a single
+sync pass instead.)
 
 Restore the latest version into a new directory:
 

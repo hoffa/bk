@@ -7,6 +7,15 @@ import (
 	"text/tabwriter"
 )
 
+// dashboard is the `bk` (no args) entry point. On a terminal it runs the live
+// watch TUI; otherwise (piped/CI) it does a single pass so it doesn't hang.
+func dashboard(w io.Writer) error {
+	if isTerminal(w) {
+		return runTUI()
+	}
+	return runDashboard(w)
+}
+
 // runDashboard renders the state of every configured backup and syncs any that
 // are out of date or never synced. It is a thin presentation layer over the
 // core model (evalEntry) and sync logic (syncConfigured).
@@ -90,6 +99,8 @@ func dot(color bool, s entryState) string {
 		return colorize("33", c) // yellow
 	case stateUnsynced:
 		return colorize("2;33", c) // dim yellow (muted)
+	case stateChecking:
+		return colorize("2", c) // dim
 	default:
 		return colorize("31", c) // red
 	}
@@ -102,9 +113,11 @@ func colorize(code, s string) string {
 // useColor reports whether to emit ANSI colors: only to a terminal, and not
 // when NO_COLOR is set.
 func useColor(w io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
+	return os.Getenv("NO_COLOR") == "" && isTerminal(w)
+}
+
+// isTerminal reports whether w is a character device (a terminal).
+func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false

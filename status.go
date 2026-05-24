@@ -15,7 +15,8 @@ import (
 type entryState int
 
 const (
-	stateSynced   entryState = iota // up to date
+	stateChecking entryState = iota // not yet evaluated (zero value)
+	stateSynced                     // up to date
 	stateStale                      // repo changed since last sync
 	stateUnsynced                   // never synced
 	stateAbsent                     // target not present (e.g. unplugged)
@@ -32,6 +33,8 @@ func (s entryState) label() string {
 		return "never synced"
 	case stateAbsent:
 		return "absent"
+	case stateChecking:
+		return "checking"
 	default:
 		return "error"
 	}
