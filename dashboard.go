@@ -38,10 +38,10 @@ func dot(color bool, s entryState) string {
 		return colorize("33", c) // yellow
 	case stateUnsynced:
 		return colorize("2;33", c) // dim yellow (muted)
-	case stateChecking:
-		return colorize("2", c) // dim
+	case stateAbsent, stateChecking:
+		return colorize("2", c) // dim/muted — absent is expected (e.g. unplugged)
 	default:
-		return colorize("31", c) // red
+		return colorize("31", c) // red — actual error
 	}
 }
 

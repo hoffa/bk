@@ -47,9 +47,11 @@ bk status
 ```
 
 Or just run `bk` with no arguments for a live dashboard. Each backup shows a
-colored ⏺ (green = synced, yellow = out of date, muted = never synced, red =
-absent/error) and its last sync time. It re-checks continuously, so plugging in
-a drive or adding an entry elsewhere shows up on its own.
+colored ⏺ (green = synced, yellow = out of date, muted = never synced or absent,
+red = error) and its last sync time. Absent is muted, not red, since an
+unplugged drive is expected — red is reserved for real errors (id mismatch, not
+a backup, unreadable source). It re-checks continuously, so plugging in a drive
+or adding an entry elsewhere shows up on its own.
 
 By default it only *shows* status. Press `a` to toggle auto-sync, which keeps
 out-of-date backups synced automatically (turning their dots green); `q` quits.
