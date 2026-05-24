@@ -14,7 +14,8 @@ func newModel(statuses ...backupStatus) tuiModel {
 }
 
 func status(source, target string, st entryState) backupStatus {
-	return backupStatus{syncEntry: syncEntry{Source: source, Target: target}, state: st}
+	// present by default; auto-sync only acts on connected targets.
+	return backupStatus{syncEntry: syncEntry{Source: source, Target: target}, state: st, present: true}
 }
 
 func TestModelInit(t *testing.T) {
@@ -68,18 +69,14 @@ func TestModelToggleAutoSync(t *testing.T) {
 	}
 }
 
-func TestModelSyncResultError(t *testing.T) {
+func TestModelSyncResultClearsSyncing(t *testing.T) {
 	s := status("/a", "/b", stateUnsynced)
 	s.ID = "x"
 	m := newModel(s)
 	m.syncing[entryKey(s.syncEntry)] = true
 	updated, _ := m.Update(syncResultMsg{entry: s.syncEntry, err: errUsage})
-	mm := updated.(tuiModel)
-	if mm.syncing[entryKey(s.syncEntry)] {
-		t.Error("syncing flag should be cleared")
-	}
-	if mm.statuses[0].state != stateError {
-		t.Errorf("state = %q, want error", mm.statuses[0].state.label())
+	if updated.(tuiModel).syncing[entryKey(s.syncEntry)] {
+		t.Error("syncing flag should be cleared after a result")
 	}
 }
 
@@ -197,7 +194,7 @@ func TestPersistID(t *testing.T) {
 	if err := saveConfig(&config{Sync: []syncEntry{{Source: "/a", Target: "/b"}}}); err != nil {
 		t.Fatal(err)
 	}
-	persistID(syncEntry{Source: "/a", Target: "/b", ID: "newid"})
+	persistEntry(syncEntry{Source: "/a", Target: "/b", ID: "newid"})
 	cfg, _, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)

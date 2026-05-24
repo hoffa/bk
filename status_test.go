@@ -49,8 +49,8 @@ func TestStatusAll(t *testing.T) {
 	}
 
 	ok := by[okTarget]
-	if ok.state != stateSynced {
-		t.Errorf("ok target state = %q, want %q", ok.state.label(), stateSynced.label())
+	if ok.state != stateSynced || !ok.present {
+		t.Errorf("ok target state = %q present=%v, want synced+present", ok.state.label(), ok.present)
 	}
 	if ok.versions != 1 {
 		t.Errorf("ok target versions = %d, want 1", ok.versions)
@@ -61,8 +61,9 @@ func TestStatusAll(t *testing.T) {
 	if by[neverTarget].state != stateUnsynced {
 		t.Errorf("never target state = %q, want %q", by[neverTarget].state.label(), stateUnsynced.label())
 	}
-	if by[absentTarget].state != stateAbsent {
-		t.Errorf("absent target state = %q, want %q", by[absentTarget].state.label(), stateAbsent.label())
+	// id set but target absent and no refs cache -> out of date, offline.
+	if absent := by[absentTarget]; absent.present || absent.state != stateStale {
+		t.Errorf("absent target state = %q present=%v, want out of date offline", absent.state.label(), absent.present)
 	}
 }
 

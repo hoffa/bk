@@ -25,21 +25,24 @@ func dashboard(w io.Writer) error {
 	return printStatus(w, statuses)
 }
 
-// dot returns the status indicator, colored when enabled.
-func dot(color bool, s entryState) string {
+// dot returns the status indicator, colored when enabled. Color encodes
+// currency; present=false dims it to signal a disconnected target.
+func dot(color bool, s entryState, present bool) string {
 	const c = "⏺"
 	if !color {
 		return c
 	}
+	dim := ""
+	if !present {
+		dim = "2;"
+	}
 	switch s {
 	case stateSynced:
-		return colorize("32", c) // green
+		return colorize(dim+"32", c) // green (dim if offline)
 	case stateStale:
-		return colorize("33", c) // yellow
-	case stateUnsynced:
-		return colorize("2;33", c) // dim yellow (muted)
-	case stateAbsent, stateChecking:
-		return colorize("2", c) // dim/muted — absent is expected (e.g. unplugged)
+		return colorize(dim+"33", c) // yellow (dim if offline)
+	case stateUnsynced, stateChecking:
+		return colorize("2", c) // muted
 	default:
 		return colorize("31", c) // red — actual error
 	}

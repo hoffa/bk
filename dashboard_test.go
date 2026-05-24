@@ -8,14 +8,20 @@ import (
 )
 
 func TestDot(t *testing.T) {
-	if got := dot(false, stateSynced); got != "⏺" {
+	if got := dot(false, stateSynced, true); got != "⏺" {
 		t.Errorf("no-color dot = %q, want plain ⏺", got)
 	}
-	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateAbsent, stateError} {
-		got := dot(true, s)
-		if !strings.Contains(got, "⏺") || !strings.Contains(got, "\033[") {
-			t.Errorf("colored dot for %s = %q", s.label(), got)
+	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateChecking, stateError} {
+		for _, present := range []bool{true, false} {
+			got := dot(true, s, present)
+			if !strings.Contains(got, "⏺") || !strings.Contains(got, "\033[") {
+				t.Errorf("colored dot for %s (present=%v) = %q", s.label(), present, got)
+			}
 		}
+	}
+	// Offline synced is dimmed relative to connected synced.
+	if dot(true, stateSynced, true) == dot(true, stateSynced, false) {
+		t.Error("offline synced dot should differ from connected")
 	}
 }
 
@@ -29,10 +35,23 @@ func TestEvalEntryStates(t *testing.T) {
 		t.Errorf("fresh entry state = %q, want never synced", s.label())
 	}
 
-	// absent: id empty, parent missing.
-	missing := filepath.Join(t.TempDir(), "gone", "backup")
-	if s := evalEntry(syncEntry{Source: repo, Target: missing}); s != stateAbsent {
-		t.Errorf("missing-parent state = %q, want absent", s.label())
+	// absent target with an id but no refs cache reads as out of date (offline).
+	st := evalStatus(syncEntry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x"})
+	if st.present {
+		t.Error("missing target should not be present")
+	}
+	if st.state != stateStale {
+		t.Errorf("absent uncached state = %q, want out of date", st.state.label())
+	}
+
+	// absent target whose cached refs match the source reads as synced (offline).
+	rh, err := repoRefsHash(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st = evalStatus(syncEntry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x", RefsHash: rh})
+	if st.present || st.state != stateSynced {
+		t.Errorf("absent cached-current state = %q present=%v, want synced offline", st.state.label(), st.present)
 	}
 
 	// synced after a sync, stale after a new commit.

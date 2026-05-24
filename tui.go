@@ -81,15 +81,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		k := entryKey(msg.entry)
 		delete(m.syncing, k)
 		if msg.err == nil {
-			persistID(msg.entry) // record a first-sync id back to the config
+			persistEntry(msg.entry) // record first-sync id + refs hash to the config
 		}
+		// Re-evaluate so the row reflects reality (errTargetAbsent, etc.) rather
+		// than forcing an error color on a transient failure.
 		for i := range m.statuses {
 			if entryKey(m.statuses[i].syncEntry) == k {
-				if msg.err != nil {
-					m.statuses[i].state = stateError
-				} else {
-					m.statuses[i] = evalStatus(msg.entry)
-				}
+				m.statuses[i] = evalStatus(msg.entry)
 				break
 			}
 		}
@@ -104,7 +102,8 @@ func (m tuiModel) startSyncs() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, s := range m.statuses {
 		k := entryKey(s.syncEntry)
-		if s.state.needsSync() && !m.syncing[k] {
+		// Only sync targets that are actually connected.
+		if s.present && s.state.needsSync() && !m.syncing[k] {
 			m.syncing[k] = true
 			cmds = append(cmds, syncEntryCmd(s.syncEntry))
 		}
@@ -125,8 +124,7 @@ func (m tuiModel) View() string {
 
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
 	for _, s := range m.statuses {
-		st := s.state
-		indicator, label := dot(true, st), st.label()
+		indicator, label := dot(true, s.state, s.present), s.label()
 		if m.syncing[entryKey(s.syncEntry)] {
 			indicator, label = colorize("36", "⏺"), "syncing…" // cyan
 		}
@@ -185,20 +183,26 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// persistID writes a first-sync id back to the config, merging into the current
-// on-disk config so a concurrent `bk add` isn't clobbered.
-func persistID(e syncEntry) {
-	if e.ID == "" {
-		return
-	}
+// persistEntry writes a synced entry's id and refs hash back to the config,
+// merging into the current on-disk config so a concurrent `bk add` isn't
+// clobbered.
+func persistEntry(e syncEntry) {
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return
 	}
 	changed := false
 	for i := range cfg.Sync {
-		if cfg.Sync[i].Source == e.Source && cfg.Sync[i].Target == e.Target && cfg.Sync[i].ID == "" {
-			cfg.Sync[i].ID = e.ID
+		c := &cfg.Sync[i]
+		if c.Source != e.Source || c.Target != e.Target {
+			continue
+		}
+		if c.ID == "" && e.ID != "" {
+			c.ID = e.ID
+			changed = true
+		}
+		if e.RefsHash != "" && c.RefsHash != e.RefsHash {
+			c.RefsHash = e.RefsHash
 			changed = true
 		}
 	}

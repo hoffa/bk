@@ -16,6 +16,10 @@ type syncEntry struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 	ID     string `json:"id,omitempty"`
+	// RefsHash caches the refs fingerprint of the last sync through this config,
+	// so currency can be shown while the target is absent (e.g. unplugged). The
+	// target's latest.json remains authoritative whenever it's present.
+	RefsHash string `json:"refs_hash,omitempty"`
 }
 
 type config struct {
@@ -96,7 +100,7 @@ func syncAll() error {
 	var dirty bool
 	for i := range cfg.Sync {
 		e := &cfg.Sync[i]
-		hadID := e.ID != ""
+		before := *e
 		switch synced, err := syncConfigured(e); {
 		case errors.Is(err, errTargetAbsent):
 			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
@@ -108,8 +112,8 @@ func syncAll() error {
 		default:
 			fmt.Printf("up to date %s -> %s\n", e.Source, e.Target)
 		}
-		if !hadID && e.ID != "" {
-			dirty = true // first sync recorded the target's id
+		if *e != before {
+			dirty = true // first-sync id and/or refs hash recorded
 		}
 	}
 	if dirty {
@@ -165,5 +169,13 @@ func syncConfigured(e *syncEntry) (bool, error) {
 		}
 	}
 
-	return syncBackup(e.Source, target)
+	synced, err := syncBackup(e.Source, target)
+	if err != nil {
+		return false, err
+	}
+	// Cache the synced refs so currency is known while the target is absent.
+	if l, err := readLatest(target); err == nil {
+		e.RefsHash = l.RefsHash
+	}
+	return synced, nil
 }
