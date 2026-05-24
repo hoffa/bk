@@ -8,45 +8,54 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+func newModel(entries ...syncEntry) tuiModel {
+	return tuiModel{
+		entries: entries,
+		states:  map[string]entryState{},
+		syncing: map[string]bool{},
+	}
+}
+
 func TestModelInit(t *testing.T) {
-	m := tuiModel{entries: []syncEntry{{Source: "/a", Target: "/b"}}, states: make([]entryState, 1), syncing: make([]bool, 1)}
-	if m.Init() == nil {
+	if newModel().Init() == nil {
 		t.Fatal("Init returned nil cmd")
 	}
 }
 
-func TestModelStatesStartsSync(t *testing.T) {
-	m := tuiModel{
-		entries: []syncEntry{{Source: "/a", Target: "/b"}, {Source: "/c", Target: "/d"}},
-		states:  make([]entryState, 2),
-		syncing: make([]bool, 2),
-	}
-	updated, cmd := m.Update(statesMsg{stateUnsynced, stateSynced})
+func TestModelRefreshStartsSync(t *testing.T) {
+	a := syncEntry{Source: "/a", Target: "/b"}
+	c := syncEntry{Source: "/c", Target: "/d"}
+	m := newModel()
+	updated, cmd := m.Update(refreshMsg{
+		entries: []syncEntry{a, c},
+		states: map[string]entryState{
+			entryKey(a): stateUnsynced,
+			entryKey(c): stateSynced,
+		},
+	})
 	mm := updated.(tuiModel)
-	if !mm.syncing[0] {
-		t.Error("expected entry 0 (needs sync) to be marked syncing")
+	if !mm.syncing[entryKey(a)] {
+		t.Error("expected stale entry to be marked syncing")
 	}
-	if mm.syncing[1] {
-		t.Error("entry 1 (synced) should not be syncing")
+	if mm.syncing[entryKey(c)] {
+		t.Error("synced entry should not be syncing")
 	}
 	if cmd == nil {
-		t.Error("expected sync command for the stale entry")
+		t.Error("expected a sync command")
 	}
 }
 
 func TestModelSyncResultError(t *testing.T) {
-	m := tuiModel{
-		entries: []syncEntry{{Source: "/a", Target: "/b", ID: "x"}},
-		states:  []entryState{stateUnsynced},
-		syncing: []bool{true},
-	}
-	updated, _ := m.Update(syncResultMsg{i: 0, entry: m.entries[0], err: errUsage})
+	e := syncEntry{Source: "/a", Target: "/b", ID: "x"}
+	m := newModel(e)
+	m.syncing[entryKey(e)] = true
+	updated, _ := m.Update(syncResultMsg{entry: e, err: errUsage})
 	mm := updated.(tuiModel)
-	if mm.syncing[0] {
+	if mm.syncing[entryKey(e)] {
 		t.Error("syncing flag should be cleared")
 	}
-	if mm.states[0] != stateError {
-		t.Errorf("state = %q, want error", mm.states[0].label())
+	if mm.states[entryKey(e)] != stateError {
+		t.Errorf("state = %q, want error", mm.states[entryKey(e)].label())
 	}
 }
 
@@ -55,41 +64,16 @@ func TestModelSyncResultSynced(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	// Create a real synced backup so evalEntry resolves to synced.
 	e := syncEntry{Source: repo, Target: target}
-	if _, err := syncConfigured(&e); err != nil {
+	if _, err := syncConfigured(&e); err != nil { // create a real synced backup
 		t.Fatal(err)
 	}
 
-	m := tuiModel{entries: []syncEntry{e}, states: []entryState{stateUnsynced}, syncing: []bool{true}}
-	updated, _ := m.Update(syncResultMsg{i: 0, entry: e, err: nil})
-	mm := updated.(tuiModel)
-	if mm.states[0] != stateSynced {
-		t.Errorf("state = %q, want synced", mm.states[0].label())
-	}
-}
-
-func TestModelSyncResultPersistsID(t *testing.T) {
-	useTempConfig(t)
-	if err := saveConfig(&config{Sync: []syncEntry{{Source: "/a", Target: "/b"}}}); err != nil {
-		t.Fatal(err)
-	}
-	m := tuiModel{
-		entries: []syncEntry{{Source: "/a", Target: "/b"}}, // id empty
-		states:  []entryState{stateUnsynced},
-		syncing: []bool{true},
-	}
-	recorded := syncEntry{Source: "/a", Target: "/b", ID: "newid123"}
-	updated, _ := m.Update(syncResultMsg{i: 0, entry: recorded, err: nil})
-	if updated.(tuiModel).entries[0].ID != "newid123" {
-		t.Error("entry id not updated in model")
-	}
-	cfg, _, err := loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Sync[0].ID != "newid123" {
-		t.Errorf("config id = %q, want newid123 (should persist)", cfg.Sync[0].ID)
+	m := newModel(e)
+	m.syncing[entryKey(e)] = true
+	updated, _ := m.Update(syncResultMsg{entry: e, err: nil})
+	if updated.(tuiModel).states[entryKey(e)] != stateSynced {
+		t.Errorf("state = %q, want synced", updated.(tuiModel).states[entryKey(e)].label())
 	}
 }
 
@@ -100,8 +84,7 @@ func TestModelQuit(t *testing.T) {
 		{Type: tea.KeyEsc},
 	}
 	for _, k := range keys {
-		m := tuiModel{entries: []syncEntry{{Source: "/a", Target: "/b"}}, states: make([]entryState, 1), syncing: make([]bool, 1)}
-		updated, cmd := m.Update(k)
+		updated, cmd := newModel(syncEntry{Source: "/a", Target: "/b"}).Update(k)
 		if !updated.(tuiModel).quitting {
 			t.Errorf("key %q: expected quitting", k.String())
 		}
@@ -112,11 +95,10 @@ func TestModelQuit(t *testing.T) {
 }
 
 func TestModelView(t *testing.T) {
-	m := tuiModel{
-		entries: []syncEntry{{Source: "/src", Target: "/dst"}},
-		states:  []entryState{stateSynced},
-		syncing: []bool{false},
-	}
+	e := syncEntry{Source: "/src", Target: "/dst"}
+	m := newModel(e)
+	m.states[entryKey(e)] = stateSynced
+
 	v := m.View()
 	for _, want := range []string{"watching", "/src", "/dst", "synced", "⏺"} {
 		if !strings.Contains(v, want) {
@@ -124,45 +106,68 @@ func TestModelView(t *testing.T) {
 		}
 	}
 
-	// Syncing entries show a syncing label.
-	m.states[0] = stateUnsynced
-	m.syncing[0] = true
+	m.syncing[entryKey(e)] = true
 	if !strings.Contains(m.View(), "syncing") {
 		t.Errorf("view should show syncing:\n%s", m.View())
 	}
 
-	// Quitting renders nothing.
+	// Empty model shows the add hint.
+	if !strings.Contains(newModel().View(), "no backups configured") {
+		t.Error("empty view should show add hint")
+	}
+
 	m.quitting = true
 	if m.View() != "" {
 		t.Errorf("quitting view should be empty, got %q", m.View())
 	}
 }
 
-func TestEvalCmd(t *testing.T) {
+func TestRefreshCmd(t *testing.T) {
+	useTempConfig(t)
 	repo := initRepo(t)
-	entries := []syncEntry{{Source: repo, Target: filepath.Join(t.TempDir(), "backup")}}
-	msg := evalCmd(entries)()
-	states, ok := msg.(statesMsg)
-	if !ok {
-		t.Fatalf("got %T, want statesMsg", msg)
+	target := filepath.Join(t.TempDir(), "backup")
+	if err := addCmd([]string{repo, target}); err != nil {
+		t.Fatal(err)
 	}
-	if len(states) != 1 || states[0] != stateUnsynced {
-		t.Fatalf("states = %v, want [never synced]", states)
+
+	msg, ok := refreshCmd()().(refreshMsg)
+	if !ok {
+		t.Fatal("refreshCmd did not return refreshMsg")
+	}
+	if len(msg.entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(msg.entries))
+	}
+	if msg.states[entryKey(msg.entries[0])] != stateUnsynced {
+		t.Errorf("state = %q, want never synced", msg.states[entryKey(msg.entries[0])].label())
 	}
 }
 
-func TestSyncCmd(t *testing.T) {
+func TestSyncEntryCmd(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
-	msg := syncEntryCmd(0, syncEntry{Source: repo, Target: target})()
-	r, ok := msg.(syncResultMsg)
+	r, ok := syncEntryCmd(syncEntry{Source: repo, Target: target})().(syncResultMsg)
 	if !ok {
-		t.Fatalf("got %T, want syncResultMsg", msg)
+		t.Fatal("syncEntryCmd did not return syncResultMsg")
 	}
 	if r.err != nil {
 		t.Fatalf("sync error: %v", r.err)
 	}
 	if r.entry.ID == "" {
 		t.Error("first sync should record an id")
+	}
+}
+
+func TestPersistID(t *testing.T) {
+	useTempConfig(t)
+	if err := saveConfig(&config{Sync: []syncEntry{{Source: "/a", Target: "/b"}}}); err != nil {
+		t.Fatal(err)
+	}
+	persistID(syncEntry{Source: "/a", Target: "/b", ID: "newid"})
+	cfg, _, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sync[0].ID != "newid" {
+		t.Errorf("config id = %q, want newid", cfg.Sync[0].ID)
 	}
 }

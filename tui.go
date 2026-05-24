@@ -9,24 +9,33 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// tickInterval is how often the TUI re-checks every backup.
+// tickInterval is how often the TUI reloads the config and re-checks backups.
 const tickInterval = 2 * time.Second
 
-// tuiModel is the live dashboard. It is a thin view over the core model: it
-// holds entries + their states and drives evalEntry / syncConfigured via
-// commands. All git/filesystem work happens off the UI goroutine.
+// entryKey identifies a configured entry stably across config reloads, so
+// state/syncing survive entries being added or removed between ticks.
+func entryKey(e syncEntry) string {
+	return e.Source + "\x00" + e.Target
+}
+
+// tuiModel is the live dashboard. It is a thin view over the core model: each
+// tick it reloads the config, re-evaluates every entry via evalEntry, and syncs
+// any that need it via syncConfigured. All git/filesystem work happens off the
+// UI goroutine via commands; state and syncing are keyed by entryKey.
 type tuiModel struct {
 	entries  []syncEntry
-	states   []entryState
-	syncing  []bool
+	states   map[string]entryState
+	syncing  map[string]bool
 	quitting bool
 }
 
 type (
-	tickMsg       time.Time
-	statesMsg     []entryState
+	tickMsg    time.Time
+	refreshMsg struct {
+		entries []syncEntry
+		states  map[string]entryState
+	}
 	syncResultMsg struct {
-		i     int
 		entry syncEntry
 		err   error
 	}
@@ -34,25 +43,16 @@ type (
 
 // runTUI runs the live watch dashboard until the user quits.
 func runTUI() error {
-	cfg, _, err := loadConfig()
-	if err != nil {
-		return err
-	}
-	if len(cfg.Sync) == 0 {
-		fmt.Println("no backups configured; add one with: bk add <repo> <backup-dir>")
-		return nil
-	}
 	m := tuiModel{
-		entries: cfg.Sync,
-		states:  make([]entryState, len(cfg.Sync)), // stateChecking (zero value)
-		syncing: make([]bool, len(cfg.Sync)),
+		states:  map[string]entryState{},
+		syncing: map[string]bool{},
 	}
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(evalCmd(m.entries), tickCmd())
+	return tea.Batch(refreshCmd(), tickCmd())
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -65,32 +65,31 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		// Re-check everything (picks up plugged-in drives, new commits).
-		return m, tea.Batch(evalCmd(m.entries), tickCmd())
+		// Reload config + re-check (picks up entries added in another terminal,
+		// plugged-in drives, and new commits).
+		return m, tea.Batch(refreshCmd(), tickCmd())
 
-	case statesMsg:
-		m.states = []entryState(msg)
+	case refreshMsg:
+		m.entries = msg.entries
+		m.states = msg.states
 		var cmds []tea.Cmd
-		for i, st := range m.states {
-			if st.needsSync() && !m.syncing[i] {
-				m.syncing[i] = true
-				cmds = append(cmds, syncEntryCmd(i, m.entries[i]))
+		for _, e := range m.entries {
+			k := entryKey(e)
+			if m.states[k].needsSync() && !m.syncing[k] {
+				m.syncing[k] = true
+				cmds = append(cmds, syncEntryCmd(e))
 			}
 		}
 		return m, tea.Batch(cmds...)
 
 	case syncResultMsg:
-		m.syncing[msg.i] = false
-		idWasEmpty := m.entries[msg.i].ID == ""
-		m.entries[msg.i] = msg.entry
+		k := entryKey(msg.entry)
+		delete(m.syncing, k)
 		if msg.err != nil {
-			m.states[msg.i] = stateError
+			m.states[k] = stateError
 		} else {
-			m.states[msg.i] = evalEntry(m.entries[msg.i])
-		}
-		if idWasEmpty && msg.entry.ID != "" {
-			// First sync recorded the target's id; persist it.
-			_ = saveConfig(&config{Sync: m.entries})
+			m.states[k] = evalEntry(msg.entry)
+			persistID(msg.entry) // record a first-sync id back to the config
 		}
 		return m, nil
 	}
@@ -105,14 +104,17 @@ func (m tuiModel) View() string {
 
 	var b strings.Builder
 	b.WriteString("bk — watching, q to quit\n\n")
+	if len(m.entries) == 0 {
+		b.WriteString("no backups configured; add one with: bk add <repo> <backup-dir>\n")
+		return b.String()
+	}
+
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	for i, e := range m.entries {
-		st := stateChecking
-		if i < len(m.states) {
-			st = m.states[i]
-		}
+	for _, e := range m.entries {
+		k := entryKey(e)
+		st := m.states[k] // missing key -> stateChecking (zero value)
 		indicator, label := dot(true, st), st.label()
-		if i < len(m.syncing) && m.syncing[i] {
+		if m.syncing[k] {
 			indicator, label = colorize("36", "⏺"), "syncing…" // cyan
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", indicator, e.Source, e.Target, label)
@@ -121,29 +123,53 @@ func (m tuiModel) View() string {
 	return b.String()
 }
 
-// evalCmd evaluates every entry's state off the UI goroutine. It works on a
-// snapshot so it never races with Update mutating the model's entries.
-func evalCmd(entries []syncEntry) tea.Cmd {
-	snapshot := append([]syncEntry(nil), entries...)
+// refreshCmd reloads the config and evaluates every entry off the UI goroutine.
+func refreshCmd() tea.Cmd {
 	return func() tea.Msg {
-		states := make([]entryState, len(snapshot))
-		for i, e := range snapshot {
-			states[i] = evalEntry(e)
+		cfg, _, err := loadConfig()
+		if err != nil {
+			return refreshMsg{}
 		}
-		return statesMsg(states)
+		states := make(map[string]entryState, len(cfg.Sync))
+		for _, e := range cfg.Sync {
+			states[entryKey(e)] = evalEntry(e)
+		}
+		return refreshMsg{entries: cfg.Sync, states: states}
 	}
 }
 
 // syncEntryCmd syncs one entry off the UI goroutine, working on a copy so the
 // result can be applied back in Update without a data race.
-func syncEntryCmd(i int, e syncEntry) tea.Cmd {
+func syncEntryCmd(e syncEntry) tea.Cmd {
 	return func() tea.Msg {
 		ec := e
 		_, err := syncConfigured(&ec)
-		return syncResultMsg{i: i, entry: ec, err: err}
+		return syncResultMsg{entry: ec, err: err}
 	}
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// persistID writes a first-sync id back to the config, merging into the current
+// on-disk config so a concurrent `bk add` isn't clobbered.
+func persistID(e syncEntry) {
+	if e.ID == "" {
+		return
+	}
+	cfg, _, err := loadConfig()
+	if err != nil {
+		return
+	}
+	changed := false
+	for i := range cfg.Sync {
+		if cfg.Sync[i].Source == e.Source && cfg.Sync[i].Target == e.Target && cfg.Sync[i].ID == "" {
+			cfg.Sync[i].ID = e.ID
+			changed = true
+		}
+	}
+	if changed {
+		_ = saveConfig(cfg)
+	}
 }
