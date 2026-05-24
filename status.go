@@ -52,15 +52,6 @@ type backupStatus struct {
 	lastSync time.Time // zero if unknown
 }
 
-// label combines currency with presence, e.g. "synced · offline".
-func (s backupStatus) label() string {
-	l := s.state.label()
-	if !s.present && (s.state == stateSynced || s.state == stateStale) {
-		l += " · offline"
-	}
-	return l
-}
-
 // statusAll returns the state of every configured entry.
 func statusAll() ([]backupStatus, error) {
 	cfg, _, err := loadConfig()
@@ -164,7 +155,7 @@ func printStatus(w io.Writer, statuses []backupStatus) error {
 		if !s.lastSync.IsZero() {
 			last = s.lastSync.Format("2006-01-02 15:04:05Z")
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, s.label(), versions, last)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, statusCode(s.state, s.present), versions, last)
 	}
 	return tw.Flush()
 }

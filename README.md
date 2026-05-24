@@ -46,20 +46,18 @@ See the state of every configured backup:
 bk status
 ```
 
-Or just run `bk` with no arguments for a live dashboard. Each backup shows a
-colored dot and its last sync time, where the color is *currency* and the
-brightness is *connection*:
+Or just run `bk` with no arguments for a live dashboard. Each backup shows an
+ASCII status badge and its last sync time:
 
-- green = synced, yellow = out of date, muted = never synced, red = error
-- a dim dot means the target is offline (e.g. an unplugged drive)
+- `OK` synced · `STALE` out of date · `NEW` never synced · `ERR` error
+- a trailing `?` (`OK?`, `STALE?`) means the target is offline, so the verdict
+  is inferred from the last sync rather than verified
 
-So a drive you synced and unplugged shows dim green ("synced · offline") — your
-work is safe — and turns dim yellow once you make new commits ("out of date ·
-offline", i.e. plug in to back up). Currency while offline is inferred from the
-last sync recorded in the config; when the target is present its own state is
-authoritative. Red is reserved for real errors (id mismatch, not a backup,
-unreadable source). It re-checks continuously, so plugging in a drive or adding
-an entry elsewhere shows up on its own.
+So a drive you synced and unplugged shows `OK?` (your work is safe as far as we
+know), turning `STALE?` once you make new commits (plug in to back up). When the
+target is present its own state is authoritative. It re-checks continuously, so
+plugging in a drive or adding an entry elsewhere shows up on its own. See
+[DESIGN.md](DESIGN.md) for the badge colors.
 
 By default it only *shows* status. Press `a` to toggle auto-sync, which keeps
 out-of-date backups synced automatically (turning their dots green); `q` quits.

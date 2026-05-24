@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -122,15 +121,21 @@ func (m tuiModel) View() string {
 		return b.String()
 	}
 
-	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
+	// Manual column widths from visible text: colored badges contain ANSI
+	// escapes, so tabwriter can't measure them. Badges are a fixed visible
+	// width, so the rest aligns when padded by source/target length.
+	srcW, tgtW := 0, 0
 	for _, s := range m.statuses {
-		indicator, label := dot(true, s.state, s.present), s.label()
-		if m.syncing[entryKey(s.syncEntry)] {
-			indicator, label = colorize("36", statusGlyph()), "syncing…" // cyan
-		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", indicator, s.Source, s.Target, label, relTime(s.lastSync))
+		srcW = max(srcW, len(s.Source))
+		tgtW = max(tgtW, len(s.Target))
 	}
-	_ = tw.Flush()
+	for _, s := range m.statuses {
+		bg := badge(true, s.state, s.present)
+		if m.syncing[entryKey(s.syncEntry)] {
+			bg = badgeText(true, "30;46", "SYNC") // black on cyan
+		}
+		_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
+	}
 
 	mode := "off"
 	if m.autoSync {

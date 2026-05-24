@@ -7,35 +7,43 @@ import (
 	"testing"
 )
 
-func TestDot(t *testing.T) {
-	if got := dot(false, stateSynced, true); got != statusGlyph() {
-		t.Errorf("no-color dot = %q, want plain glyph", got)
+func TestStatusCode(t *testing.T) {
+	cases := []struct {
+		s       entryState
+		present bool
+		want    string
+	}{
+		{stateSynced, true, "OK"},
+		{stateSynced, false, "OK?"},
+		{stateStale, true, "STALE"},
+		{stateStale, false, "STALE?"}, // "?" = unverified (offline)
+		{stateUnsynced, true, "NEW"},
+		{stateError, true, "ERR"},
 	}
-	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateChecking, stateError} {
-		for _, present := range []bool{true, false} {
-			got := dot(true, s, present)
-			if !strings.Contains(got, statusGlyph()) || !strings.Contains(got, "\033[") {
-				t.Errorf("colored dot for %s (present=%v) = %q", s.label(), present, got)
-			}
+	for _, c := range cases {
+		if got := statusCode(c.s, c.present); got != c.want {
+			t.Errorf("statusCode(%s, present=%v) = %q, want %q", c.s.label(), c.present, got, c.want)
 		}
-	}
-	// Offline synced is dimmed relative to connected synced.
-	if dot(true, stateSynced, true) == dot(true, stateSynced, false) {
-		t.Error("offline synced dot should differ from connected")
 	}
 }
 
-func TestStatusGlyph(t *testing.T) {
-	t.Setenv("LC_ALL", "")
-	t.Setenv("LC_CTYPE", "")
-
-	t.Setenv("LANG", "en_US.UTF-8")
-	if got := statusGlyph(); got != "●" {
-		t.Errorf("UTF-8 locale glyph = %q, want ●", got)
+func TestBadge(t *testing.T) {
+	// Plain badge: ASCII only, fixed 7-column width, no escapes.
+	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateError} {
+		plain := badge(false, s, true)
+		if len(plain) != 8 {
+			t.Errorf("plain badge for %s = %q (width %d, want 8)", s.label(), plain, len(plain))
+		}
+		if strings.Contains(plain, "\033[") {
+			t.Errorf("plain badge should have no color: %q", plain)
+		}
 	}
-	t.Setenv("LANG", "C")
-	if got := statusGlyph(); got != "*" {
-		t.Errorf("non-UTF-8 locale glyph = %q, want *", got)
+	if !strings.Contains(badge(false, stateSynced, true), "OK") {
+		t.Error("badge missing code text")
+	}
+	// Colored badge wraps the code in an ANSI background.
+	if c := badge(true, stateError, true); !strings.Contains(c, "ERR") || !strings.Contains(c, "\033[") {
+		t.Errorf("colored badge = %q", c)
 	}
 }
 

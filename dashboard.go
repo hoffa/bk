@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 )
 
 // dashboard is the `bk` (no args) entry point. On a terminal it runs the live
@@ -26,52 +25,55 @@ func dashboard(w io.Writer) error {
 	return printStatus(w, statuses)
 }
 
-// statusGlyph is the status mark: a filled circle (as used by systemctl), or
-// ASCII when the terminal locale isn't UTF-8. The color carries the meaning, so
-// the exact glyph is cosmetic.
-func statusGlyph() string {
-	if utf8Locale() {
-		return "●"
-	}
-	return "*"
-}
-
-// utf8Locale reports whether the environment advertises a UTF-8 locale.
-func utf8Locale() bool {
-	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
-		if v := os.Getenv(k); v != "" {
-			v = strings.ToUpper(v)
-			return strings.Contains(v, "UTF-8") || strings.Contains(v, "UTF8")
-		}
-	}
-	return false
-}
-
-// dot returns the status indicator, colored when enabled. Color encodes
-// currency; present=false dims it to signal a disconnected target.
-func dot(color bool, s entryState, present bool) string {
-	c := statusGlyph()
-	if !color {
-		return c
-	}
-	dim := ""
+// statusCode is the short ASCII code for a state + presence. A trailing "?"
+// means unverified: the target is absent, so the verdict is inferred from the
+// last sync recorded in the config rather than confirmed against the target.
+func statusCode(s entryState, present bool) string {
+	q := ""
 	if !present {
-		dim = "2;"
+		q = "?"
 	}
 	switch s {
 	case stateSynced:
-		return colorize(dim+"32", c) // green (dim if offline)
+		return "OK" + q
 	case stateStale:
-		return colorize(dim+"33", c) // yellow (dim if offline)
-	case stateUnsynced, stateChecking:
-		return colorize("2", c) // muted
+		return "STALE" + q
+	case stateUnsynced:
+		return "NEW"
+	case stateError:
+		return "ERR"
 	default:
-		return colorize("31", c) // red — actual error
+		return "--"
 	}
 }
 
-func colorize(code, s string) string {
-	return "\033[" + code + "m" + s + "\033[0m"
+// badge renders a status code as a fixed-width cell, colored as a background
+// badge (like a test runner's PASS/FAIL) when color is enabled.
+func badge(color bool, s entryState, present bool) string {
+	return badgeText(color, bgColor(s), statusCode(s, present))
+}
+
+// badgeText renders text as a fixed-width badge with the given ANSI code.
+func badgeText(color bool, code, text string) string {
+	cell := fmt.Sprintf(" %-6s ", text) // 8 visible columns, regardless of color
+	if !color {
+		return cell
+	}
+	return "\033[" + code + "m" + cell + "\033[0m"
+}
+
+// bgColor is the ANSI attribute (fg;bg) for a state's badge.
+func bgColor(s entryState) string {
+	switch s {
+	case stateSynced:
+		return "30;42" // black on green
+	case stateStale:
+		return "30;43" // black on yellow
+	case stateError:
+		return "97;41" // white on red
+	default: // unsynced, checking
+		return "30;47" // black on grey
+	}
 }
 
 // isTerminal reports whether w is a character device (a terminal).

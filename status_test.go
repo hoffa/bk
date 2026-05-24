@@ -89,14 +89,14 @@ func TestEvalEntryErrors(t *testing.T) {
 func TestPrintStatus(t *testing.T) {
 	var buf bytes.Buffer
 	statuses := []backupStatus{
-		{syncEntry: syncEntry{Source: "/a", Target: "/b", ID: "0123456789abcdef0123"}, state: stateSynced, versions: 3},
+		{syncEntry: syncEntry{Source: "/a", Target: "/b", ID: "0123456789abcdef0123"}, state: stateSynced, present: true, versions: 3},
 		{syncEntry: syncEntry{Source: "/c", Target: "/d"}, state: stateUnsynced},
 	}
 	if err := printStatus(&buf, statuses); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"SOURCE", "TARGET", "0123456789ab", "synced", "never synced", "/a", "/d"} {
+	for _, want := range []string{"SOURCE", "TARGET", "0123456789ab", "OK", "NEW", "/a", "/d"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
