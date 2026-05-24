@@ -101,19 +101,25 @@ func statusAll() ([]backupStatus, error) {
 	}
 	out := make([]backupStatus, 0, len(cfg.Sync))
 	for _, e := range cfg.Sync {
-		s := backupStatus{syncEntry: e, state: evalEntry(e)}
-		// versions/last-sync only exist once the target is a valid backup.
-		if s.state == stateSynced || s.state == stateStale {
-			target, _ := filepath.Abs(e.Target)
-			bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
-			s.versions = len(bundles)
-			if l, err := readLatest(target); err == nil {
-				s.lastSync = l.SyncedAt
-			}
-		}
-		out = append(out, s)
+		out = append(out, evalStatus(e))
 	}
 	return out, nil
+}
+
+// evalStatus computes one entry's state plus display details, without modifying
+// anything.
+func evalStatus(e syncEntry) backupStatus {
+	s := backupStatus{syncEntry: e, state: evalEntry(e)}
+	// versions/last-sync only exist once the target is a valid backup.
+	if s.state == stateSynced || s.state == stateStale {
+		target, _ := filepath.Abs(e.Target)
+		bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+		s.versions = len(bundles)
+		if l, err := readLatest(target); err == nil {
+			s.lastSync = l.SyncedAt
+		}
+	}
+	return s
 }
 
 // short returns the first n characters of s.

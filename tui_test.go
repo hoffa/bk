@@ -4,16 +4,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func newModel(entries ...syncEntry) tuiModel {
-	return tuiModel{
-		entries: entries,
-		states:  map[string]entryState{},
-		syncing: map[string]bool{},
-	}
+func newModel(statuses ...backupStatus) tuiModel {
+	return tuiModel{statuses: statuses, syncing: map[string]bool{}}
+}
+
+func status(source, target string, st entryState) backupStatus {
+	return backupStatus{syncEntry: syncEntry{Source: source, Target: target}, state: st}
 }
 
 func TestModelInit(t *testing.T) {
@@ -22,40 +23,63 @@ func TestModelInit(t *testing.T) {
 	}
 }
 
-func TestModelRefreshStartsSync(t *testing.T) {
-	a := syncEntry{Source: "/a", Target: "/b"}
-	c := syncEntry{Source: "/c", Target: "/d"}
+func TestModelRefreshNoAutoSync(t *testing.T) {
 	m := newModel()
-	updated, cmd := m.Update(refreshMsg{
-		entries: []syncEntry{a, c},
-		states: map[string]entryState{
-			entryKey(a): stateUnsynced,
-			entryKey(c): stateSynced,
-		},
-	})
-	mm := updated.(tuiModel)
-	if !mm.syncing[entryKey(a)] {
-		t.Error("expected stale entry to be marked syncing")
+	updated, _ := m.Update(refreshMsg{status("/a", "/b", stateUnsynced)})
+	if len(updated.(tuiModel).syncing) != 0 {
+		t.Error("auto-sync off: should not start syncs")
 	}
-	if mm.syncing[entryKey(c)] {
-		t.Error("synced entry should not be syncing")
+}
+
+func TestModelRefreshAutoSync(t *testing.T) {
+	m := newModel()
+	m.autoSync = true
+	stale := status("/a", "/b", stateUnsynced)
+	updated, cmd := m.Update(refreshMsg{stale, status("/c", "/d", stateSynced)})
+	mm := updated.(tuiModel)
+	if !mm.syncing[entryKey(stale.syncEntry)] {
+		t.Error("auto-sync on: stale entry should be syncing")
 	}
 	if cmd == nil {
-		t.Error("expected a sync command")
+		t.Error("expected sync command")
+	}
+}
+
+func TestModelToggleAutoSync(t *testing.T) {
+	stale := status("/a", "/b", stateUnsynced)
+	m := newModel(stale)
+	keyA := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
+
+	updated, cmd := m.Update(keyA)
+	mm := updated.(tuiModel)
+	if !mm.autoSync {
+		t.Fatal("pressing a should enable auto-sync")
+	}
+	if !mm.syncing[entryKey(stale.syncEntry)] {
+		t.Error("enabling auto-sync should start syncing the stale entry")
+	}
+	if cmd == nil {
+		t.Error("expected sync command on enable")
+	}
+
+	off, _ := mm.Update(keyA)
+	if off.(tuiModel).autoSync {
+		t.Error("pressing a again should disable auto-sync")
 	}
 }
 
 func TestModelSyncResultError(t *testing.T) {
-	e := syncEntry{Source: "/a", Target: "/b", ID: "x"}
-	m := newModel(e)
-	m.syncing[entryKey(e)] = true
-	updated, _ := m.Update(syncResultMsg{entry: e, err: errUsage})
+	s := status("/a", "/b", stateUnsynced)
+	s.ID = "x"
+	m := newModel(s)
+	m.syncing[entryKey(s.syncEntry)] = true
+	updated, _ := m.Update(syncResultMsg{entry: s.syncEntry, err: errUsage})
 	mm := updated.(tuiModel)
-	if mm.syncing[entryKey(e)] {
+	if mm.syncing[entryKey(s.syncEntry)] {
 		t.Error("syncing flag should be cleared")
 	}
-	if mm.states[entryKey(e)] != stateError {
-		t.Errorf("state = %q, want error", mm.states[entryKey(e)].label())
+	if mm.statuses[0].state != stateError {
+		t.Errorf("state = %q, want error", mm.statuses[0].state.label())
 	}
 }
 
@@ -69,11 +93,12 @@ func TestModelSyncResultSynced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := newModel(e)
+	m := newModel(status(repo, target, stateUnsynced))
+	m.statuses[0].syncEntry = e
 	m.syncing[entryKey(e)] = true
 	updated, _ := m.Update(syncResultMsg{entry: e, err: nil})
-	if updated.(tuiModel).states[entryKey(e)] != stateSynced {
-		t.Errorf("state = %q, want synced", updated.(tuiModel).states[entryKey(e)].label())
+	if updated.(tuiModel).statuses[0].state != stateSynced {
+		t.Errorf("state = %q, want synced", updated.(tuiModel).statuses[0].state.label())
 	}
 }
 
@@ -84,7 +109,7 @@ func TestModelQuit(t *testing.T) {
 		{Type: tea.KeyEsc},
 	}
 	for _, k := range keys {
-		updated, cmd := newModel(syncEntry{Source: "/a", Target: "/b"}).Update(k)
+		updated, cmd := newModel(status("/a", "/b", stateSynced)).Update(k)
 		if !updated.(tuiModel).quitting {
 			t.Errorf("key %q: expected quitting", k.String())
 		}
@@ -95,23 +120,19 @@ func TestModelQuit(t *testing.T) {
 }
 
 func TestModelView(t *testing.T) {
-	e := syncEntry{Source: "/src", Target: "/dst"}
-	m := newModel(e)
-	m.states[entryKey(e)] = stateSynced
-
+	m := newModel(status("/src", "/dst", stateSynced))
 	v := m.View()
-	for _, want := range []string{"watching", "/src", "/dst", "synced", "⏺"} {
+	for _, want := range []string{"/src", "/dst", "synced", "⏺", "auto-sync", "q: quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}
 	}
 
-	m.syncing[entryKey(e)] = true
+	m.syncing[entryKey(m.statuses[0].syncEntry)] = true
 	if !strings.Contains(m.View(), "syncing") {
 		t.Errorf("view should show syncing:\n%s", m.View())
 	}
 
-	// Empty model shows the add hint.
 	if !strings.Contains(newModel().View(), "no backups configured") {
 		t.Error("empty view should show add hint")
 	}
@@ -122,6 +143,24 @@ func TestModelView(t *testing.T) {
 	}
 }
 
+func TestRelTime(t *testing.T) {
+	cases := []struct {
+		t    time.Time
+		want string
+	}{
+		{time.Time{}, "never"},
+		{time.Now().Add(-30 * time.Second), "just now"},
+		{time.Now().Add(-5 * time.Minute), "5m ago"},
+		{time.Now().Add(-3 * time.Hour), "3h ago"},
+		{time.Now().Add(-50 * time.Hour), "2d ago"},
+	}
+	for _, c := range cases {
+		if got := relTime(c.t); got != c.want {
+			t.Errorf("relTime = %q, want %q", got, c.want)
+		}
+	}
+}
+
 func TestRefreshCmd(t *testing.T) {
 	useTempConfig(t)
 	repo := initRepo(t)
@@ -129,16 +168,12 @@ func TestRefreshCmd(t *testing.T) {
 	if err := addCmd([]string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
-
-	msg, ok := refreshCmd()().(refreshMsg)
+	statuses, ok := refreshCmd()().(refreshMsg)
 	if !ok {
 		t.Fatal("refreshCmd did not return refreshMsg")
 	}
-	if len(msg.entries) != 1 {
-		t.Fatalf("got %d entries, want 1", len(msg.entries))
-	}
-	if msg.states[entryKey(msg.entries[0])] != stateUnsynced {
-		t.Errorf("state = %q, want never synced", msg.states[entryKey(msg.entries[0])].label())
+	if len(statuses) != 1 || statuses[0].state != stateUnsynced {
+		t.Fatalf("statuses = %v, want one never-synced", statuses)
 	}
 }
 

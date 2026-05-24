@@ -13,40 +13,35 @@ import (
 const tickInterval = 2 * time.Second
 
 // entryKey identifies a configured entry stably across config reloads, so
-// state/syncing survive entries being added or removed between ticks.
+// syncing state survives entries being added or removed between ticks.
 func entryKey(e syncEntry) string {
 	return e.Source + "\x00" + e.Target
 }
 
-// tuiModel is the live dashboard. It is a thin view over the core model: each
-// tick it reloads the config, re-evaluates every entry via evalEntry, and syncs
-// any that need it via syncConfigured. All git/filesystem work happens off the
-// UI goroutine via commands; state and syncing are keyed by entryKey.
+// tuiModel is the live status dashboard. By default it only shows status; auto
+// sync is opt-in via a key. It is a thin view over the core: each tick it
+// reloads the config and re-evaluates via statusAll, and (when auto sync is on)
+// syncs out-of-date entries via syncConfigured. All work happens off the UI
+// goroutine via commands.
 type tuiModel struct {
-	entries  []syncEntry
-	states   map[string]entryState
+	statuses []backupStatus
 	syncing  map[string]bool
+	autoSync bool
 	quitting bool
 }
 
 type (
-	tickMsg    time.Time
-	refreshMsg struct {
-		entries []syncEntry
-		states  map[string]entryState
-	}
+	tickMsg       time.Time
+	refreshMsg    []backupStatus
 	syncResultMsg struct {
 		entry syncEntry
 		err   error
 	}
 )
 
-// runTUI runs the live watch dashboard until the user quits.
+// runTUI runs the live status dashboard until the user quits.
 func runTUI() error {
-	m := tuiModel{
-		states:  map[string]entryState{},
-		syncing: map[string]bool{},
-	}
+	m := tuiModel{syncing: map[string]bool{}}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -62,39 +57,59 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c", "esc":
 			m.quitting = true
 			return m, tea.Quit
+		case "a":
+			m.autoSync = !m.autoSync
+			if m.autoSync {
+				return m, m.startSyncs()
+			}
+			return m, nil
 		}
 
 	case tickMsg:
-		// Reload config + re-check (picks up entries added in another terminal,
-		// plugged-in drives, and new commits).
+		// Reload config + re-check (picks up entries added elsewhere, plugged-in
+		// drives, and new commits).
 		return m, tea.Batch(refreshCmd(), tickCmd())
 
 	case refreshMsg:
-		m.entries = msg.entries
-		m.states = msg.states
-		var cmds []tea.Cmd
-		for _, e := range m.entries {
-			k := entryKey(e)
-			if m.states[k].needsSync() && !m.syncing[k] {
-				m.syncing[k] = true
-				cmds = append(cmds, syncEntryCmd(e))
-			}
+		m.statuses = []backupStatus(msg)
+		if m.autoSync {
+			return m, m.startSyncs()
 		}
-		return m, tea.Batch(cmds...)
+		return m, nil
 
 	case syncResultMsg:
 		k := entryKey(msg.entry)
 		delete(m.syncing, k)
-		if msg.err != nil {
-			m.states[k] = stateError
-		} else {
-			m.states[k] = evalEntry(msg.entry)
+		if msg.err == nil {
 			persistID(msg.entry) // record a first-sync id back to the config
+		}
+		for i := range m.statuses {
+			if entryKey(m.statuses[i].syncEntry) == k {
+				if msg.err != nil {
+					m.statuses[i].state = stateError
+				} else {
+					m.statuses[i] = evalStatus(msg.entry)
+				}
+				break
+			}
 		}
 		return m, nil
 	}
 
 	return m, nil
+}
+
+// startSyncs kicks off syncs for every out-of-date entry not already syncing.
+func (m tuiModel) startSyncs() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, s := range m.statuses {
+		k := entryKey(s.syncEntry)
+		if s.state.needsSync() && !m.syncing[k] {
+			m.syncing[k] = true
+			cmds = append(cmds, syncEntryCmd(s.syncEntry))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m tuiModel) View() string {
@@ -103,38 +118,56 @@ func (m tuiModel) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("bk — watching, q to quit\n\n")
-	if len(m.entries) == 0 {
+	if len(m.statuses) == 0 {
 		b.WriteString("no backups configured; add one with: bk add <repo> <backup-dir>\n")
 		return b.String()
 	}
 
 	tw := tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)
-	for _, e := range m.entries {
-		k := entryKey(e)
-		st := m.states[k] // missing key -> stateChecking (zero value)
+	for _, s := range m.statuses {
+		st := s.state
 		indicator, label := dot(true, st), st.label()
-		if m.syncing[k] {
+		if m.syncing[entryKey(s.syncEntry)] {
 			indicator, label = colorize("36", "⏺"), "syncing…" // cyan
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", indicator, e.Source, e.Target, label)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", indicator, s.Source, s.Target, label, relTime(s.lastSync))
 	}
 	_ = tw.Flush()
+
+	mode := "off"
+	if m.autoSync {
+		mode = "on"
+	}
+	_, _ = fmt.Fprintf(&b, "\nauto-sync: %s  ·  a: toggle auto-sync   q: quit\n", mode)
 	return b.String()
+}
+
+// relTime renders a sync time as a short relative string.
+func relTime(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 // refreshCmd reloads the config and evaluates every entry off the UI goroutine.
 func refreshCmd() tea.Cmd {
 	return func() tea.Msg {
-		cfg, _, err := loadConfig()
+		statuses, err := statusAll()
 		if err != nil {
-			return refreshMsg{}
+			return refreshMsg(nil)
 		}
-		states := make(map[string]entryState, len(cfg.Sync))
-		for _, e := range cfg.Sync {
-			states[entryKey(e)] = evalEntry(e)
-		}
-		return refreshMsg{entries: cfg.Sync, states: states}
+		return refreshMsg(statuses)
 	}
 }
 
