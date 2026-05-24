@@ -166,10 +166,36 @@ func restoreBackup(backupDir, restorePath string) error {
 	return nil
 }
 
+// backupDirUsable reports whether dir is safe to use as a backup target: it
+// doesn't exist, is empty, or already contains our sentinel. A non-empty
+// directory without the sentinel is someone else's data, never a backup.
+func backupDirUsable(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if e.Name() == backupSentinel {
+			return true, nil
+		}
+	}
+	return len(entries) == 0, nil
+}
+
 // initBackup ensures backupDir is an initialized backup: it creates versions/
 // and, if BK_BACKUP.json is absent, writes one with a fresh id. An existing
-// sentinel is left untouched so the id is stable across syncs.
+// sentinel is left untouched so the id is stable across syncs. It refuses to
+// write into a non-empty directory that isn't already a backup.
 func initBackup(dir string) error {
+	if ok, err := backupDirUsable(dir); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("%s exists and is not a bk backup (not empty); refusing to write", dir)
+	}
+
 	if err := os.MkdirAll(filepath.Join(dir, versionsDir), 0755); err != nil {
 		return err
 	}

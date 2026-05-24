@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,6 +94,17 @@ func TestEvalEntryStates(t *testing.T) {
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 	if s := evalEntry(cfg.Sync[0]); s != stateStale {
 		t.Errorf("after commit state = %q, want out of date", s.label())
+	}
+}
+
+func TestEvalStatusUnusableTarget(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "junk"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Never-synced entry whose target is a non-empty non-backup dir -> error.
+	if s := evalStatus(syncEntry{Source: "/x", Target: dir}); s.state != stateError {
+		t.Errorf("state = %q, want error", s.state.label())
 	}
 }
 

@@ -79,6 +79,15 @@ func evalStatus(e syncEntry) backupStatus {
 	s.present = statExists(target)
 
 	if e.ID == "" {
+		// Never synced. If the target exists but isn't safe to initialize
+		// (non-empty, not a backup), surface an error instead of NEW so we
+		// don't keep trying to write into it.
+		if s.present {
+			if ok, err := backupDirUsable(target); err != nil || !ok {
+				s.state = stateError
+				return s
+			}
+		}
 		s.state = stateUnsynced
 		return s
 	}

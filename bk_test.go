@@ -155,6 +155,46 @@ func TestRestoreExistingTarget(t *testing.T) {
 	}
 }
 
+func TestInitBackupRefusesNonEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "important.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := initBackup(dir); err == nil {
+		t.Fatal("expected refusal to initialize a non-empty non-backup dir")
+	}
+	// And it must not have written into the dir.
+	if _, err := os.Stat(filepath.Join(dir, backupSentinel)); !os.IsNotExist(err) {
+		t.Error("sentinel should not have been written")
+	}
+	if _, err := os.Stat(filepath.Join(dir, versionsDir)); !os.IsNotExist(err) {
+		t.Error("versions dir should not have been created")
+	}
+}
+
+func TestInitBackupEmptyAndAdopt(t *testing.T) {
+	// Empty dir is fine.
+	dir := t.TempDir()
+	if err := initBackup(dir); err != nil {
+		t.Fatalf("empty dir should initialize: %v", err)
+	}
+	// Re-init (sentinel present) is idempotent / adopts.
+	if err := initBackup(dir); err != nil {
+		t.Fatalf("re-init should adopt: %v", err)
+	}
+}
+
+func TestSyncRefusesNonEmptyTarget(t *testing.T) {
+	repo := initRepo(t)
+	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "data"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := syncBackup(repo, target); err == nil {
+		t.Fatal("expected sync to refuse a non-empty non-backup target")
+	}
+}
+
 func TestRestoreNotABackup(t *testing.T) {
 	err := restoreBackup(t.TempDir(), filepath.Join(t.TempDir(), "restored"))
 	if err == nil || !strings.Contains(err.Error(), "not a backup directory") {
