@@ -49,8 +49,8 @@ func TestStatusAll(t *testing.T) {
 	}
 
 	ok := by[okTarget]
-	if ok.state != stateOK {
-		t.Errorf("ok target state = %q, want %q", ok.state, stateOK)
+	if ok.state != stateSynced {
+		t.Errorf("ok target state = %q, want %q", ok.state.label(), stateSynced.label())
 	}
 	if ok.versions != 1 {
 		t.Errorf("ok target versions = %d, want 1", ok.versions)
@@ -58,21 +58,21 @@ func TestStatusAll(t *testing.T) {
 	if ok.lastSync.IsZero() {
 		t.Error("ok target lastSync is zero")
 	}
-	if by[neverTarget].state != stateNeverSynced {
-		t.Errorf("never target state = %q, want %q", by[neverTarget].state, stateNeverSynced)
+	if by[neverTarget].state != stateUnsynced {
+		t.Errorf("never target state = %q, want %q", by[neverTarget].state.label(), stateUnsynced.label())
 	}
 	if by[absentTarget].state != stateAbsent {
-		t.Errorf("absent target state = %q, want %q", by[absentTarget].state, stateAbsent)
+		t.Errorf("absent target state = %q, want %q", by[absentTarget].state.label(), stateAbsent.label())
 	}
 }
 
-func TestStatusMismatchAndNotBackup(t *testing.T) {
+func TestEvalEntryErrors(t *testing.T) {
 	repo := initRepo(t)
 
 	// id set but target has no BK_BACKUP.json.
 	notBackup := t.TempDir()
-	if s := entryStatus(syncEntry{Source: repo, Target: notBackup, ID: "abc"}); s.state != stateNotBackup {
-		t.Errorf("state = %q, want %q", s.state, stateNotBackup)
+	if s := evalEntry(syncEntry{Source: repo, Target: notBackup, ID: "abc"}); s != stateError {
+		t.Errorf("not-a-backup state = %q, want error", s.label())
 	}
 
 	// id set, valid backup, but a different id.
@@ -80,22 +80,22 @@ func TestStatusMismatchAndNotBackup(t *testing.T) {
 	if err := initBackup(mismatch); err != nil {
 		t.Fatal(err)
 	}
-	if s := entryStatus(syncEntry{Source: repo, Target: mismatch, ID: "not-the-real-id"}); s.state != stateIDMismatch {
-		t.Errorf("state = %q, want %q", s.state, stateIDMismatch)
+	if s := evalEntry(syncEntry{Source: repo, Target: mismatch, ID: "not-the-real-id"}); s != stateError {
+		t.Errorf("id-mismatch state = %q, want error", s.label())
 	}
 }
 
 func TestPrintStatus(t *testing.T) {
 	var buf bytes.Buffer
 	statuses := []backupStatus{
-		{syncEntry: syncEntry{Source: "/a", Target: "/b", ID: "0123456789abcdef0123"}, state: stateOK, versions: 3},
-		{syncEntry: syncEntry{Source: "/c", Target: "/d"}, state: stateNeverSynced},
+		{syncEntry: syncEntry{Source: "/a", Target: "/b", ID: "0123456789abcdef0123"}, state: stateSynced, versions: 3},
+		{syncEntry: syncEntry{Source: "/c", Target: "/d"}, state: stateUnsynced},
 	}
 	if err := printStatus(&buf, statuses); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"SOURCE", "TARGET", "0123456789ab", stateOK, stateNeverSynced, "/a", "/d"} {
+	for _, want := range []string{"SOURCE", "TARGET", "0123456789ab", "synced", "never synced", "/a", "/d"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

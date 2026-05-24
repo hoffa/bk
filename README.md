@@ -46,6 +46,10 @@ See the state of every configured backup:
 bk status
 ```
 
+Or just run `bk` with no arguments for a dashboard that shows each backup with
+a colored ⏺ (green = synced, yellow = out of date, muted = never synced, red =
+absent/error) and automatically syncs the ones that need it.
+
 Restore the latest version into a new directory:
 
 ```sh

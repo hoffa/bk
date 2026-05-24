@@ -10,19 +10,82 @@ import (
 	"time"
 )
 
-// Backup states reported by status.
+// entryState is a configured backup's sync state. It is the shared core model
+// behind both `bk status` and the dashboard.
+type entryState int
+
 const (
-	stateOK          = "ok"
-	stateNeverSynced = "never synced"
-	stateAbsent      = "absent"
-	stateNotBackup   = "not a backup"
-	stateIDMismatch  = "id mismatch"
+	stateSynced   entryState = iota // up to date
+	stateStale                      // repo changed since last sync
+	stateUnsynced                   // never synced
+	stateAbsent                     // target not present (e.g. unplugged)
+	stateError                      // misconfigured or unreadable
 )
 
-// backupStatus is the computed state of one configured entry.
+func (s entryState) label() string {
+	switch s {
+	case stateSynced:
+		return "synced"
+	case stateStale:
+		return "out of date"
+	case stateUnsynced:
+		return "never synced"
+	case stateAbsent:
+		return "absent"
+	default:
+		return "error"
+	}
+}
+
+// needsSync reports whether syncing the entry would create a new version.
+func (s entryState) needsSync() bool {
+	return s == stateStale || s == stateUnsynced
+}
+
+// evalEntry computes an entry's state without modifying anything. It reads the
+// source repo only when needed to tell synced from out of date.
+func evalEntry(e syncEntry) entryState {
+	target, err := filepath.Abs(e.Target)
+	if err != nil {
+		return stateError
+	}
+
+	if e.ID == "" {
+		// Never synced; syncable only if the parent (e.g. a mount) is present.
+		if _, err := os.Stat(filepath.Dir(target)); err != nil {
+			return stateAbsent
+		}
+		return stateUnsynced
+	}
+
+	if _, err := os.Stat(target); err != nil {
+		return stateAbsent
+	}
+	meta, err := loadBackupMeta(target)
+	if err != nil {
+		return stateError
+	}
+	if meta.ID != e.ID {
+		return stateError
+	}
+	latest, err := readLatest(target)
+	if err != nil {
+		return stateStale
+	}
+	refsHash, err := repoRefsHash(e.Source)
+	if err != nil {
+		return stateError
+	}
+	if latest.RefsHash == refsHash {
+		return stateSynced
+	}
+	return stateStale
+}
+
+// backupStatus is an entry's state plus display details for `bk status`.
 type backupStatus struct {
 	syncEntry
-	state    string
+	state    entryState
 	versions int
 	lastSync time.Time // zero if unknown
 }
@@ -35,46 +98,19 @@ func statusAll() ([]backupStatus, error) {
 	}
 	out := make([]backupStatus, 0, len(cfg.Sync))
 	for _, e := range cfg.Sync {
-		out = append(out, entryStatus(e))
+		s := backupStatus{syncEntry: e, state: evalEntry(e)}
+		// versions/last-sync only exist once the target is a valid backup.
+		if s.state == stateSynced || s.state == stateStale {
+			target, _ := filepath.Abs(e.Target)
+			bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+			s.versions = len(bundles)
+			if l, err := readLatest(target); err == nil {
+				s.lastSync = l.SyncedAt
+			}
+		}
+		out = append(out, s)
 	}
 	return out, nil
-}
-
-// entryStatus inspects one entry's target without modifying anything.
-func entryStatus(e syncEntry) backupStatus {
-	s := backupStatus{syncEntry: e}
-
-	if e.ID == "" {
-		s.state = stateNeverSynced
-		return s
-	}
-
-	target, err := filepath.Abs(e.Target)
-	if err != nil {
-		s.state = stateAbsent
-		return s
-	}
-	if _, err := os.Stat(target); err != nil {
-		s.state = stateAbsent
-		return s
-	}
-	meta, err := loadBackupMeta(target)
-	if err != nil {
-		s.state = stateNotBackup
-		return s
-	}
-	if meta.ID != e.ID {
-		s.state = stateIDMismatch
-		return s
-	}
-
-	s.state = stateOK
-	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
-	s.versions = len(bundles)
-	if l, err := readLatest(target); err == nil {
-		s.lastSync = l.SyncedAt
-	}
-	return s
 }
 
 // short returns the first n characters of s.
@@ -95,13 +131,13 @@ func printStatus(w io.Writer, statuses []backupStatus) error {
 		if s.ID != "" {
 			id = short(s.ID, 12)
 		}
-		if s.state == stateOK {
+		if s.versions > 0 {
 			versions = strconv.Itoa(s.versions)
 		}
 		if !s.lastSync.IsZero() {
 			last = s.lastSync.Format("2006-01-02 15:04:05Z")
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, s.state, versions, last)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, s.state.label(), versions, last)
 	}
 	return tw.Flush()
 }

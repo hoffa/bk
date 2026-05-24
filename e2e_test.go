@@ -91,13 +91,13 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("no args is usage", func(t *testing.T) {
+	t.Run("no args runs dashboard", func(t *testing.T) {
 		out, code := runBin(t)
-		if code != 2 {
-			t.Fatalf("exit %d, want 2\n%s", code, out)
+		if code != 0 {
+			t.Fatalf("exit %d, want 0\n%s", code, out)
 		}
-		if !strings.Contains(out, "usage:") {
-			t.Fatalf("missing usage text:\n%s", out)
+		if !strings.Contains(out, backup) {
+			t.Fatalf("dashboard missing target:\n%s", out)
 		}
 	})
 

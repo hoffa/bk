@@ -61,22 +61,22 @@ func writeLatest(backupDir string, l latestMeta) error {
 // and its sha256 sidecar are written, then latest.json is atomically updated to
 // point at the new bundle. The backup is initialized on first sync. If the
 // repo's refs are unchanged since the last sync, it does nothing.
-func syncBackup(repoPath, backupDir string) error {
+// It reports whether a new version was written (false means already up to date).
+func syncBackup(repoPath, backupDir string) (bool, error) {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := initBackup(backupDir); err != nil {
-		return err
+		return false, err
 	}
 
 	refsHash, err := repoRefsHash(repoPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if prev, err := readLatest(backupDir); err == nil && prev.RefsHash == refsHash {
-		fmt.Printf("up to date: %s\n", repoPath)
-		return nil
+		return false, nil // already up to date
 	}
 
 	// Unique, sortable name: UTC timestamp + random suffix to avoid collisions
@@ -84,7 +84,7 @@ func syncBackup(repoPath, backupDir string) error {
 	ts := time.Now().UTC().Format("20060102T150405Z")
 	suffix, err := randHex(3)
 	if err != nil {
-		return err
+		return false, err
 	}
 	base := fmt.Sprintf("bk-%s-%s.bundle", ts, suffix)
 	bundlePath := filepath.Join(backupDir, versionsDir, base)
@@ -94,23 +94,23 @@ func syncBackup(repoPath, backupDir string) error {
 	// bundle never appears under its final name (or gets referenced below).
 	if err := createBundle(repoPath, tmpBundle); err != nil {
 		_ = os.Remove(tmpBundle)
-		return err
+		return false, err
 	}
 	sum, err := sha256File(tmpBundle)
 	if err != nil {
 		_ = os.Remove(tmpBundle)
-		return err
+		return false, err
 	}
 	if err := os.Rename(tmpBundle, bundlePath); err != nil {
 		_ = os.Remove(tmpBundle)
-		return err
+		return false, err
 	}
 
 	// Sidecar before latest.json; latest.json is updated last so it only ever
 	// points at a fully-written, verified bundle with a complete sidecar.
 	sidecar := fmt.Sprintf("%s  %s\n", sum, base)
 	if err := atomicWriteFile(bundlePath+".sha256", []byte(sidecar), 0644); err != nil {
-		return err
+		return false, err
 	}
 
 	rel := filepath.ToSlash(filepath.Join(versionsDir, base))
@@ -119,11 +119,10 @@ func syncBackup(repoPath, backupDir string) error {
 		RefsHash: refsHash,
 		SyncedAt: time.Now().UTC(),
 	}); err != nil {
-		return err
+		return false, err
 	}
 
-	fmt.Printf("synced %s -> %s/%s\n", repoPath, backupDir, rel)
-	return nil
+	return true, nil
 }
 
 // restoreBackup restores the latest version of the backup at backupDir into

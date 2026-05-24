@@ -97,16 +97,19 @@ func syncAll() error {
 	for i := range cfg.Sync {
 		e := &cfg.Sync[i]
 		hadID := e.ID != ""
-		switch err := syncConfigured(e); {
+		switch synced, err := syncConfigured(e); {
 		case errors.Is(err, errTargetAbsent):
 			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
 		case err != nil:
 			fmt.Fprintf(os.Stderr, "error %s -> %s: %v\n", e.Source, e.Target, err)
 			failed++
+		case synced:
+			fmt.Printf("synced %s -> %s\n", e.Source, e.Target)
 		default:
-			if !hadID && e.ID != "" {
-				dirty = true // first sync recorded the target's id
-			}
+			fmt.Printf("up to date %s -> %s\n", e.Source, e.Target)
+		}
+		if !hadID && e.ID != "" {
+			dirty = true // first sync recorded the target's id
 		}
 	}
 	if dirty {
@@ -123,10 +126,11 @@ func syncAll() error {
 // syncConfigured syncs one entry. On the first sync (empty id) it initializes
 // the target and records its id; afterwards it verifies the target's id matches
 // before syncing. A target that isn't present is reported as errTargetAbsent.
-func syncConfigured(e *syncEntry) error {
+// It reports whether a new version was written.
+func syncConfigured(e *syncEntry) (bool, error) {
 	target, err := filepath.Abs(e.Target)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if e.ID == "" {
@@ -134,30 +138,30 @@ func syncConfigured(e *syncEntry) error {
 		// the backup on the intended volume, not somewhere a missing mount used
 		// to be.
 		if _, err := os.Stat(filepath.Dir(target)); errors.Is(err, os.ErrNotExist) {
-			return errTargetAbsent
+			return false, errTargetAbsent
 		} else if err != nil {
-			return err
+			return false, err
 		}
 		if err := initBackup(target); err != nil {
-			return err
+			return false, err
 		}
 		meta, err := loadBackupMeta(target)
 		if err != nil {
-			return err
+			return false, err
 		}
 		e.ID = meta.ID
 	} else {
 		if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
-			return errTargetAbsent
+			return false, errTargetAbsent
 		} else if err != nil {
-			return err
+			return false, err
 		}
 		meta, err := loadBackupMeta(target)
 		if err != nil {
-			return fmt.Errorf("not a valid backup: %w", err)
+			return false, fmt.Errorf("not a valid backup: %w", err)
 		}
 		if meta.ID != e.ID {
-			return fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
+			return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
 		}
 	}
 

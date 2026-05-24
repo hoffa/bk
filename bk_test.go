@@ -50,7 +50,7 @@ func TestSyncRestoreRoundTrip(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(repo, backup); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(repo, backup); err != nil {
 		t.Fatalf("sync 1: %v", err)
 	}
 	first, err := loadBackupMeta(backup)
@@ -92,7 +92,7 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 	}
 
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
-	if err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(repo, backup); err != nil {
 		t.Fatalf("sync 2: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 func TestRestoreShaMismatch(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
-	if err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(repo, backup); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,7 +144,7 @@ func TestRestoreShaMismatch(t *testing.T) {
 func TestRestoreExistingTarget(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
-	if err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(repo, backup); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,7 +289,6 @@ func TestRunAddSyncRestore(t *testing.T) {
 
 func TestRunUsageErrors(t *testing.T) {
 	cases := [][]string{
-		{},                      // no command
 		{"bogus"},               // unknown command
 		{"sync", "a"},           // too few args
 		{"restore", "a"},        // too few args

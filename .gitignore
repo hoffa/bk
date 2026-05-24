@@ -37,3 +37,4 @@ go.work.sum
 
 # Git bundles
 *.bundle
+.DS_Store
