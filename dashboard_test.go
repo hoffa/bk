@@ -18,7 +18,7 @@ func TestStatusCode(t *testing.T) {
 		{stateStale, true, "STALE"},
 		{stateStale, false, "STALE?"}, // "?" = unverified (offline)
 		{stateUnsynced, true, "NEW"},
-		{stateError, true, "ERR"},
+		{stateError, true, "ERROR"},
 	}
 	for _, c := range cases {
 		if got := statusCode(c.s, c.present); got != c.want {

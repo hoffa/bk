@@ -41,11 +41,14 @@ func statusCode(s entryState, present bool) string {
 	case stateUnsynced:
 		return "NEW"
 	case stateError:
-		return "ERR"
+		return "ERROR"
 	default:
 		return "--"
 	}
 }
+
+// badgeWidth is the longest code ("STALE?") plus a space of padding each side.
+const badgeWidth = 8
 
 // badge renders a status code as a fixed-width cell, colored as a background
 // badge (like a test runner's PASS/FAIL) when color is enabled.
@@ -53,9 +56,10 @@ func badge(color bool, s entryState, present bool) string {
 	return badgeText(color, bgColor(s), statusCode(s, present))
 }
 
-// badgeText renders text as a fixed-width badge with the given ANSI code.
+// badgeText renders text left-aligned in a fixed-width badge with the given
+// ANSI code (the colored block is the same width for every badge).
 func badgeText(color bool, code, text string) string {
-	cell := fmt.Sprintf(" %-6s ", text) // 8 visible columns, regardless of color
+	cell := fmt.Sprintf(" %-*s", badgeWidth-1, text) // leading space, padded right
 	if !color {
 		return cell
 	}
