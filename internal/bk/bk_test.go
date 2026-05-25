@@ -342,31 +342,6 @@ func TestInitBackupEmptyAndAdopt(t *testing.T) {
 	}
 }
 
-func TestReadSidecarSum(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "s.sha256")
-	if err := os.WriteFile(p, []byte("deadbeef  x.bundle\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := readSidecarSum(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != "deadbeef" {
-		t.Fatalf("got %q, want deadbeef", got)
-	}
-
-	empty := filepath.Join(t.TempDir(), "empty.sha256")
-	if err := os.WriteFile(empty, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := readSidecarSum(empty); err == nil {
-		t.Fatal("expected error for empty sidecar")
-	}
-}
-
 func TestEvalStates(t *testing.T) {
 	ctx := t.Context()
 	repo := initRepo(t)

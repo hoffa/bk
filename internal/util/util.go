@@ -1,15 +1,21 @@
 // Package util holds small, stdlib-only helpers reused across bk: file
-// existence checks, file hashing, atomic writes, and random hex ids.
+// existence checks, file hashing, atomic writes, random hex ids, and sha256
+// checksum sidecars.
 package util
 
 import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// sumSuffix is the extension of a file's sha256 checksum sidecar.
+const sumSuffix = ".sha256"
 
 // Exists reports whether path exists.
 func Exists(path string) bool {
@@ -32,6 +38,31 @@ func SHA256(path string) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// WriteSHA256Sum writes a sha256 checksum sidecar for the file at path: it
+// creates "<path>.sha256" containing "<sum>  <name>", where name is path's base
+// name. This is the standard sha256sum format that `shasum -a 256 -c` reads.
+func WriteSHA256Sum(path, sum string) error {
+	line := fmt.Sprintf("%s  %s\n", sum, filepath.Base(path))
+
+	return AtomicWrite(path+sumSuffix, []byte(line), 0644)
+}
+
+// ReadSHA256Sum returns the hex digest from the sha256 sidecar of the file at
+// path ("<path>.sha256"): the first field of its "<hash>  <name>" line.
+func ReadSHA256Sum(path string) (string, error) {
+	data, err := os.ReadFile(path + sumSuffix)
+	if err != nil {
+		return "", err
+	}
+
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("empty sha256 sidecar: %s", path+sumSuffix)
+	}
+
+	return fields[0], nil
 }
 
 // AtomicWrite writes data to path atomically: it writes a temp file in the same

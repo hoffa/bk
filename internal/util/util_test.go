@@ -3,10 +3,54 @@ package util_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hoffa/bk/internal/util"
 )
+
+func TestSHA256Sum(t *testing.T) {
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "x.bundle")
+
+	if err := util.WriteSHA256Sum(bundle, "deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The sidecar is sha256sum format: "<hash>  <base name>".
+	raw, err := os.ReadFile(bundle + ".sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(raw), "deadbeef") || !strings.Contains(string(raw), "x.bundle") {
+		t.Fatalf("sidecar = %q", raw)
+	}
+
+	got, err := util.ReadSHA256Sum(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got != "deadbeef" {
+		t.Fatalf("got %q, want deadbeef", got)
+	}
+
+	// Missing sidecar errors.
+	if _, err := util.ReadSHA256Sum(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("expected error for missing sidecar")
+	}
+
+	// Empty sidecar errors.
+	empty := filepath.Join(dir, "e.bundle")
+	if err := os.WriteFile(empty+".sha256", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := util.ReadSHA256Sum(empty); err == nil {
+		t.Fatal("expected error for empty sidecar")
+	}
+}
 
 func TestExists(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "f")

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/hoffa/bk/internal/git"
@@ -119,8 +118,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 
 	// Sidecar before latest.json; latest.json is updated last so it only ever
 	// points at a fully-written, verified bundle with a complete sidecar.
-	sidecar := fmt.Sprintf("%s  %s\n", sum, base)
-	if err := util.AtomicWrite(bundlePath+".sha256", []byte(sidecar), 0644); err != nil {
+	if err := util.WriteSHA256Sum(bundlePath, sum); err != nil {
 		return false, err
 	}
 
@@ -167,7 +165,7 @@ func Restore(ctx context.Context, backupDir, dst string) error {
 
 	bundlePath := filepath.Join(backupDir, filepath.FromSlash(rel))
 
-	want, err := readSidecarSum(bundlePath + ".sha256")
+	want, err := util.ReadSHA256Sum(bundlePath)
 	if err != nil {
 		return err
 	}
@@ -254,19 +252,4 @@ func loadBackupMeta(dir string) (*backupMeta, error) {
 	}
 
 	return &m, nil
-}
-
-// readSidecarSum returns the hex digest from a "<hash>  <name>" sha256 sidecar.
-func readSidecarSum(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("empty sha256 sidecar: %s", path)
-	}
-
-	return fields[0], nil
 }
