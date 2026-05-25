@@ -177,7 +177,7 @@ func TestInitForce(t *testing.T) {
 	}
 }
 
-func TestRunRm(t *testing.T) {
+func TestRunRemove(t *testing.T) {
 	useTempConfig(t)
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
@@ -192,8 +192,8 @@ func TestRunRm(t *testing.T) {
 	}
 
 	// Remove by an id prefix.
-	if err := run(t.Context(), []string{"rm", cfg.Sync[0].ID[:6]}); err != nil {
-		t.Fatalf("rm: %v", err)
+	if err := run(t.Context(), []string{"remove", cfg.Sync[0].ID[:6]}); err != nil {
+		t.Fatalf("remove: %v", err)
 	}
 
 	if cfg, _ := bk.Load(); len(cfg.Sync) != 0 {
@@ -201,7 +201,7 @@ func TestRunRm(t *testing.T) {
 	}
 
 	// Unknown id errors.
-	if err := run(t.Context(), []string{"rm", "nope"}); err == nil {
+	if err := run(t.Context(), []string{"remove", "nope"}); err == nil {
 		t.Fatal("expected error removing unknown id")
 	}
 }

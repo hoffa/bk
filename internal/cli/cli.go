@@ -23,7 +23,7 @@ import (
 var errUsage = errors.New("usage")
 
 func usage() {
-	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  init                                  set the backup password (run once)\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  rm <id>                               remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
+	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  init                                  set the backup password (run once)\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  remove <id>                           remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
 }
 
 // readPassword returns the backup password from $BK_PASSWORD (handy for scripts
@@ -248,12 +248,12 @@ func initCmd(args []string) error {
 	return nil
 }
 
-func rmCmd(args []string) error {
-	fs := flag.NewFlagSet("rm", flag.ExitOnError)
+func removeCmd(args []string) error {
+	fs := flag.NewFlagSet("remove", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: bk rm <id>")
+		fmt.Fprintln(os.Stderr, "usage: bk remove <id>")
 		return errUsage
 	}
 
@@ -321,8 +321,8 @@ func run(ctx context.Context, args []string) error {
 		return addCmd(ctx, rest)
 	case "status":
 		return statusCmd(ctx, rest)
-	case "rm":
-		return rmCmd(rest)
+	case "remove":
+		return removeCmd(rest)
 	case "restore":
 		return restoreCmd(ctx, rest)
 	default:
