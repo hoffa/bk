@@ -153,7 +153,7 @@ func syncCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-func addCmd(args []string) error {
+func addCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
@@ -169,6 +169,11 @@ func addCmd(args []string) error {
 
 	target, err := filepath.Abs(fs.Arg(1))
 	if err != nil {
+		return err
+	}
+
+	// Fail fast if the source isn't a git repo, rather than at the first sync.
+	if err := bk.CheckRepo(ctx, source); err != nil {
 		return err
 	}
 
@@ -242,7 +247,7 @@ func run(ctx context.Context, args []string) error {
 	case "sync":
 		return syncCmd(ctx, rest)
 	case "add":
-		return addCmd(rest)
+		return addCmd(ctx, rest)
 	case "status":
 		return statusCmd(ctx, rest)
 	case "restore":

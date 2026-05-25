@@ -89,6 +89,15 @@ func TestRunAddSyncRestore(t *testing.T) {
 	}
 }
 
+func TestAddRejectsNonRepo(t *testing.T) {
+	useTempConfig(t)
+
+	err := addCmd(t.Context(), []string{t.TempDir(), filepath.Join(t.TempDir(), "backup")})
+	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Fatalf("want not-a-git-repository error, got %v", err)
+	}
+}
+
 func TestRunSyncNoEntries(t *testing.T) {
 	useTempConfig(t)
 

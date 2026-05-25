@@ -71,7 +71,7 @@ func TestDashboardNonTTYStatus(t *testing.T) {
 	repo := initRepo(t)
 
 	target := filepath.Join(t.TempDir(), "backup")
-	if err := addCmd([]string{repo, target}); err != nil {
+	if err := addCmd(t.Context(), []string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
 

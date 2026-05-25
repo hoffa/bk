@@ -101,7 +101,7 @@ func TestModelSyncResultSynced(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "backup")
 
 	// add sets up the keyring; then create a real synced backup.
-	if err := addCmd([]string{repo, target}); err != nil {
+	if err := addCmd(t.Context(), []string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -213,7 +213,7 @@ func TestRefreshCmd(t *testing.T) {
 	repo := initRepo(t)
 
 	target := filepath.Join(t.TempDir(), "backup")
-	if err := addCmd([]string{repo, target}); err != nil {
+	if err := addCmd(t.Context(), []string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,7 +233,7 @@ func TestSyncEntryCmd(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "backup")
 
 	// add sets up the keyring; syncEntryCmd loads it from the config.
-	if err := addCmd([]string{repo, target}); err != nil {
+	if err := addCmd(t.Context(), []string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -9,7 +9,18 @@ import (
 	"time"
 
 	"github.com/hoffa/bk/internal/crypt"
+	"github.com/hoffa/bk/internal/git"
 )
+
+// CheckRepo verifies that path is a readable git repository. It lets `add` fail
+// fast with a clear message instead of surfacing a raw git error at first sync.
+func CheckRepo(ctx context.Context, path string) error {
+	if _, err := git.RefsHash(ctx, path); err != nil {
+		return fmt.Errorf("not a git repository: %s", path)
+	}
+
+	return nil
+}
 
 // Sync backs up a single configured entry. On the first sync (empty ID) it
 // initializes the target with the keyring kr and records its id; afterwards it
