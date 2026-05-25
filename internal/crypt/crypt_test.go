@@ -17,7 +17,7 @@ func TestKeyringRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if kr.Recipient == "" || kr.WrappedKey == "" {
+	if kr.Public == "" || kr.PrivateEncrypted == "" {
 		t.Fatalf("empty keyring: %+v", kr)
 	}
 
@@ -50,7 +50,7 @@ func TestEncryptDecryptFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := crypt.EncryptFile(enc, plain, kr.Recipient); err != nil {
+	if err := crypt.EncryptFile(enc, plain, kr.Public); err != nil {
 		t.Fatalf("EncryptFile: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestDecryptWrongIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := crypt.EncryptFile(enc, plain, kr1.Recipient); err != nil {
+	if err := crypt.EncryptFile(enc, plain, kr1.Public); err != nil {
 		t.Fatal(err)
 	}
 

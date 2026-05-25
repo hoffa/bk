@@ -113,7 +113,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyrin
 		return false, err
 	}
 
-	if err := crypt.EncryptFile(tmpEnc, tmpPlain, kr.Recipient); err != nil {
+	if err := crypt.EncryptFile(tmpEnc, tmpPlain, kr.Public); err != nil {
 		_ = os.Remove(tmpPlain)
 		_ = os.Remove(tmpEnc)
 

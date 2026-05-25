@@ -101,7 +101,7 @@ func (c *Config) Add(source, target string) error {
 
 // HasKey reports whether the encryption keyring has been set up.
 func (c *Config) HasKey() bool {
-	return c.Key.Recipient != ""
+	return c.Key.Public != ""
 }
 
 // SetPassword creates the encryption keyring from password. Backups are then

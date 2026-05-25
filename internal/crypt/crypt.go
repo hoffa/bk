@@ -23,8 +23,8 @@ var ErrWrongPassword = errors.New("incorrect password")
 // encrypted to, and the X25519 identity wrapped (scrypt) under the password.
 // Neither reveals anything without the password.
 type Keyring struct {
-	Recipient  string // age public recipient, "age1..."
-	WrappedKey string // identity encrypted to the password, base64
+	Public           string // public key bundles are encrypted to, "age1..."
+	PrivateEncrypted string // the private key, encrypted under the password (base64)
 }
 
 // NewKeyring generates a fresh identity and wraps it under password.
@@ -39,7 +39,7 @@ func NewKeyring(password string) (Keyring, error) {
 		return Keyring{}, err
 	}
 
-	return Keyring{Recipient: id.Recipient().String(), WrappedKey: wrapped}, nil
+	return Keyring{Public: id.Recipient().String(), PrivateEncrypted: wrapped}, nil
 }
 
 // Identity unwraps the decryption identity, returning ErrWrongPassword if the
@@ -50,9 +50,9 @@ func (k Keyring) Identity(password string) (*age.X25519Identity, error) {
 		return nil, err
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(k.WrappedKey)
+	raw, err := base64.StdEncoding.DecodeString(k.PrivateEncrypted)
 	if err != nil {
-		return nil, fmt.Errorf("decode wrapped key: %w", err)
+		return nil, fmt.Errorf("decode private key: %w", err)
 	}
 
 	r, err := age.Decrypt(bytes.NewReader(raw), scrypt)
@@ -68,9 +68,9 @@ func (k Keyring) Identity(password string) (*age.X25519Identity, error) {
 	return age.ParseX25519Identity(string(secret))
 }
 
-// EncryptFile encrypts the file at src to dst for recipient.
-func EncryptFile(dst, src, recipient string) error {
-	r, err := age.ParseX25519Recipient(recipient)
+// EncryptFile encrypts the file at src to dst for the public key.
+func EncryptFile(dst, src, public string) error {
+	r, err := age.ParseX25519Recipient(public)
 	if err != nil {
 		return err
 	}
