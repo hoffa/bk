@@ -94,8 +94,8 @@ func Eval(ctx context.Context, e Entry) Status {
 		s.State = StateStale
 		s.LastSync = e.Backup.SyncedAt
 
-		if e.Backup.RefsHash != "" {
-			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.Backup.RefsHash {
+		if e.Backup.ContentHash != "" {
+			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.Backup.ContentHash {
 				s.State = StateSynced
 			}
 		}
@@ -126,7 +126,7 @@ func Eval(ctx context.Context, e Entry) Status {
 		s.Versions = len(bundles)
 	}
 
-	if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == latest.RefsHash {
+	if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == latest.ContentHash {
 		s.State = StateSynced
 	} else {
 		s.State = StateStale

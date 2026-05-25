@@ -389,7 +389,7 @@ func TestEvalStates(t *testing.T) {
 
 	when := time.Now().UTC()
 
-	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x", RefsHash: rh, SyncedAt: when}})
+	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x", ContentHash: rh, SyncedAt: when}})
 	if st.Present || st.State != StateSynced {
 		t.Errorf("absent cached-current = %q present=%v, want synced offline", st.State.Label(), st.Present)
 	}

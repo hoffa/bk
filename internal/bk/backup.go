@@ -34,9 +34,9 @@ type backupMeta struct {
 // plus the refs fingerprint it captured, used to skip a sync when nothing has
 // changed.
 type latestMeta struct {
-	Path     string
-	RefsHash string
-	SyncedAt time.Time
+	Path        string
+	ContentHash string
+	SyncedAt    time.Time
 }
 
 // readLatest reads latest.json from backupDir.
@@ -85,7 +85,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyrin
 		return false, err
 	}
 
-	if prev, err := readLatest(backupDir); err == nil && prev.RefsHash == refsHash {
+	if prev, err := readLatest(backupDir); err == nil && prev.ContentHash == refsHash {
 		return false, nil // already up to date
 	}
 
@@ -141,9 +141,9 @@ func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyrin
 
 	rel := filepath.ToSlash(filepath.Join(versionsDir, base))
 	if err := writeLatest(backupDir, latestMeta{
-		Path:     rel,
-		RefsHash: refsHash,
-		SyncedAt: time.Now().UTC(),
+		Path:        rel,
+		ContentHash: refsHash,
+		SyncedAt:    time.Now().UTC(),
 	}); err != nil {
 		return false, err
 	}

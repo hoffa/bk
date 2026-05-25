@@ -33,9 +33,9 @@ type Entry struct {
 // verify and show status while the target is absent. The target's own
 // BK_BACKUP.json / latest.json are authoritative; this is a regenerable cache.
 type Backup struct {
-	ID       string    // the backup's identity, for trust-on-first-use
-	RefsHash string    // refs fingerprint at the last sync
-	SyncedAt time.Time // last sync time
+	ID          string    // the backup's identity, for trust-on-first-use
+	ContentHash string    // fingerprint of the source's content at the last sync
+	SyncedAt    time.Time // last sync time
 }
 
 // Config is the whole on-disk config: the set of configured backups plus the

@@ -73,7 +73,7 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 	// Cache the synced refs + time so currency and last-sync time are known while
 	// the target is absent.
 	if l, err := readLatest(target); err == nil {
-		e.Backup.RefsHash = l.RefsHash
+		e.Backup.ContentHash = l.ContentHash
 		e.Backup.SyncedAt = l.SyncedAt
 	}
 
