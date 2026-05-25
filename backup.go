@@ -2,18 +2,15 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/hoffa/bk/internal/git"
+	"github.com/hoffa/bk/internal/util"
 )
 
 const (
@@ -59,7 +56,7 @@ func writeLatest(backupDir string, l latestMeta) error {
 		return err
 	}
 
-	return atomicWriteFile(filepath.Join(backupDir, latestFile), append(data, '\n'), 0644)
+	return util.AtomicWrite(filepath.Join(backupDir, latestFile), append(data, '\n'), 0644)
 }
 
 // syncBackup creates a new full bundle of repoPath and appends it to the backup
@@ -87,18 +84,20 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 		return false, nil // already up to date
 	}
 
-	// Unique, sortable name: UTC timestamp + random suffix to avoid collisions
-	// between syncs landing in the same second (no existing state is read).
-	ts := time.Now().UTC().Format("20060102T150405Z")
-
-	suffix, err := randHex(3)
-	if err != nil {
-		return false, err
-	}
-
-	base := fmt.Sprintf("bk-%s-%s.bundle", ts, suffix)
+	// Sortable, nanosecond-resolution UTC name. Versions are append-only, so
+	// refuse to reuse a name already on disk rather than overwrite it. Syncs to a
+	// backup are serialized and the nanosecond stamp makes a real collision
+	// practically impossible, so an existing name means something is wrong --
+	// error rather than clobber a previous version.
+	base := fmt.Sprintf("bk-%s.bundle", time.Now().UTC().Format("20060102T150405.000000000Z"))
 	bundlePath := filepath.Join(backupDir, versionsDir, base)
 	tmpBundle := bundlePath + ".tmp"
+
+	if _, err := os.Stat(bundlePath); err == nil {
+		return false, fmt.Errorf("version %s already exists; refusing to overwrite", base)
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
 
 	// Write + verify the bundle under a temp name first so a partial or corrupt
 	// bundle never appears under its final name (or gets referenced below).
@@ -107,7 +106,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 		return false, err
 	}
 
-	sum, err := sha256File(tmpBundle)
+	sum, err := util.SHA256(tmpBundle)
 	if err != nil {
 		_ = os.Remove(tmpBundle)
 		return false, err
@@ -121,7 +120,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 	// Sidecar before latest.json; latest.json is updated last so it only ever
 	// points at a fully-written, verified bundle with a complete sidecar.
 	sidecar := fmt.Sprintf("%s  %s\n", sum, base)
-	if err := atomicWriteFile(bundlePath+".sha256", []byte(sidecar), 0644); err != nil {
+	if err := util.AtomicWrite(bundlePath+".sha256", []byte(sidecar), 0644); err != nil {
 		return false, err
 	}
 
@@ -173,7 +172,7 @@ func restoreBackup(ctx context.Context, backupDir, restorePath string) error {
 		return err
 	}
 
-	got, err := sha256File(bundlePath)
+	got, err := util.SHA256(bundlePath)
 	if err != nil {
 		return err
 	}
@@ -235,7 +234,7 @@ func initBackup(dir string) error {
 		return err
 	}
 
-	id, err := randHex(16)
+	id, err := util.RandHex(16)
 	if err != nil {
 		return err
 	}
@@ -245,7 +244,7 @@ func initBackup(dir string) error {
 		return err
 	}
 
-	return atomicWriteFile(sentinel, append(data, '\n'), 0644)
+	return util.AtomicWrite(sentinel, append(data, '\n'), 0644)
 }
 
 // loadBackupMeta reads and parses BK_BACKUP.json from dir.
@@ -276,62 +275,4 @@ func readSidecarSum(path string) (string, error) {
 	}
 
 	return fields[0], nil
-}
-
-// sha256File returns the hex-encoded sha256 of the file at path.
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// atomicWriteFile writes data to path atomically by writing a temp file in the
-// same directory, fsyncing it, and renaming it over path.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".bk-tmp-*")
-	if err != nil {
-		return err
-	}
-
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }() // no-op once the rename succeeds
-
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-
-	if err := f.Close(); err != nil {
-		return err
-	}
-
-	if err := os.Chmod(tmp, perm); err != nil {
-		return err
-	}
-
-	return os.Rename(tmp, path)
-}
-
-// randHex returns n random bytes as a hex string.
-func randHex(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(b), nil
 }

@@ -237,28 +237,6 @@ func TestRestoreNoVersions(t *testing.T) {
 	}
 }
 
-func TestSha256File(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "f")
-	if err := os.WriteFile(p, []byte("abc"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// echo -n abc | sha256sum
-	const want = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-
-	got, err := sha256File(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got != want {
-		t.Fatalf("sha256 = %s, want %s", got, want)
-	}
-
-	if _, err := sha256File(filepath.Join(t.TempDir(), "missing")); err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
-
 func TestReadSidecarSum(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "s.sha256")
 	if err := os.WriteFile(p, []byte("deadbeef  x.bundle\n"), 0644); err != nil {
@@ -281,45 +259,6 @@ func TestReadSidecarSum(t *testing.T) {
 
 	if _, err := readSidecarSum(empty); err == nil {
 		t.Fatal("expected error for empty sidecar")
-	}
-}
-
-func TestAtomicWriteFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "out")
-	if err := atomicWriteFile(p, []byte("data"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if string(got) != "data" {
-		t.Fatalf("got %q, want data", got)
-	}
-	// Overwrite is atomic and replaces content.
-	if err := atomicWriteFile(p, []byte("new"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	if got, _ := os.ReadFile(p); string(got) != "new" {
-		t.Fatalf("got %q, want new", got)
-	}
-}
-
-func TestRandHex(t *testing.T) {
-	s, err := randHex(8)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(s) != 16 {
-		t.Fatalf("randHex(8) len = %d, want 16", len(s))
-	}
-
-	if other, _ := randHex(8); other == s {
-		t.Fatal("randHex returned identical values")
 	}
 }
 

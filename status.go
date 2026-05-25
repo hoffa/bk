@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"text/tabwriter"
 	"time"
 
 	"github.com/hoffa/bk/internal/git"
+	"github.com/hoffa/bk/internal/util"
 )
 
 // entryState is a configured backup's currency. It is the shared core model
@@ -83,7 +83,7 @@ func evalStatus(ctx context.Context, e syncEntry) backupStatus {
 		return s
 	}
 
-	s.present = statExists(target)
+	s.present = util.Exists(target)
 
 	if e.ID == "" {
 		// Never synced. If the target exists but isn't safe to initialize
@@ -149,11 +149,6 @@ func evalStatus(ctx context.Context, e syncEntry) backupStatus {
 // evalEntry returns just an entry's currency state.
 func evalEntry(ctx context.Context, e syncEntry) entryState {
 	return evalStatus(ctx, e).state
-}
-
-func statExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // short returns the first n characters of s.

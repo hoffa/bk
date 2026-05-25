@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/hoffa/bk/internal/util"
 )
 
 // syncEntry is one configured backup: a source repo and a target backup dir.
@@ -92,7 +94,7 @@ func saveConfig(c *config) error {
 		return err
 	}
 
-	return atomicWriteFile(path, append(data, '\n'), 0644)
+	return util.AtomicWrite(path, append(data, '\n'), 0644)
 }
 
 // syncAll syncs every configured entry. A target that is not present (e.g. an
