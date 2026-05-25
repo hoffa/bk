@@ -145,6 +145,38 @@ func TestInit(t *testing.T) {
 	}
 }
 
+func TestInitForce(t *testing.T) {
+	t.Setenv("BK_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("BK_PASSWORD", "pw1")
+
+	if err := run(t.Context(), []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := cfg.Key.Public
+
+	// Re-init without --force is refused.
+	if err := run(t.Context(), []string{"init"}); err == nil {
+		t.Fatal("re-init without --force should fail")
+	}
+
+	// With --force it sets a new key.
+	t.Setenv("BK_PASSWORD", "pw2")
+
+	if err := run(t.Context(), []string{"init", "--force"}); err != nil {
+		t.Fatalf("init --force: %v", err)
+	}
+
+	if cfg2, _ := bk.Load(); cfg2.Key.Public == old {
+		t.Error("--force should generate a new key")
+	}
+}
+
 func TestRunRm(t *testing.T) {
 	useTempConfig(t)
 	repo := initRepo(t)

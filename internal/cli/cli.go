@@ -206,10 +206,11 @@ func addCmd(ctx context.Context, args []string) error {
 
 func initCmd(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	force := fs.Bool("force", false, "replace an existing key (existing backups become unreadable)")
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk init")
+		fmt.Fprintln(os.Stderr, "usage: bk init [--force]")
 		return errUsage
 	}
 
@@ -218,8 +219,14 @@ func initCmd(args []string) error {
 		return err
 	}
 
+	if cfg.HasKey() && !*force {
+		return errors.New("already initialized (use --force to set a new password, abandoning existing backups)")
+	}
+
 	if cfg.HasKey() {
-		return errors.New("already initialized")
+		fmt.Fprintln(os.Stderr, "WARNING: --force creates a NEW key. Existing backups stay locked to the OLD")
+		fmt.Fprintln(os.Stderr, "password and bk will not use them; wipe or replace their targets to back up")
+		fmt.Fprintln(os.Stderr, "again under the new password. This cannot be undone.")
 	}
 
 	pw, err := readNewPassword()
