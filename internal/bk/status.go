@@ -95,7 +95,10 @@ func Eval(ctx context.Context, e Entry) Status {
 		s.LastSync = e.Backup.SyncedAt
 
 		if e.Backup.ContentHash != "" {
-			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.Backup.ContentHash {
+			switch rh, err := git.RefsHash(ctx, e.Source); {
+			case err != nil:
+				s.State = StateError // source unreadable (e.g. deleted repo)
+			case rh == e.Backup.ContentHash:
 				s.State = StateSynced
 			}
 		}
@@ -115,6 +118,13 @@ func Eval(ctx context.Context, e Entry) Status {
 		return s
 	}
 
+	// A target we can't encrypt to (e.g. a legacy target with an empty keyring)
+	// can't be synced; report it here rather than only at sync time.
+	if meta.Key.Public == "" {
+		s.State = StateError
+		return s
+	}
+
 	latest, err := readLatest(target)
 	if err != nil {
 		s.State = StateStale
@@ -126,9 +136,12 @@ func Eval(ctx context.Context, e Entry) Status {
 		s.Versions = len(bundles)
 	}
 
-	if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == latest.ContentHash {
+	switch rh, err := git.RefsHash(ctx, e.Source); {
+	case err != nil:
+		s.State = StateError // source unreadable (e.g. deleted repo)
+	case rh == latest.ContentHash:
 		s.State = StateSynced
-	} else {
+	default:
 		s.State = StateStale
 	}
 
