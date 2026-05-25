@@ -67,7 +67,7 @@ func Eval(ctx context.Context, e Entry) Status {
 
 	s.Present = util.Exists(target)
 
-	if e.ID == "" {
+	if e.Backup == nil {
 		// Never synced. The first sync creates the target, so "reachable" means
 		// the parent (e.g. a mount point) exists -- not the target itself, which
 		// won't exist yet. Without this, auto-sync would never fire on a fresh add.
@@ -92,12 +92,10 @@ func Eval(ctx context.Context, e Entry) Status {
 		// Offline: judge currency from the cached last-synced refs, and show the
 		// cached last-sync time (how stale this unplugged copy is).
 		s.State = StateStale
-		if t, err := time.Parse(time.RFC3339, e.SyncedAt); err == nil {
-			s.LastSync = t
-		}
+		s.LastSync = e.Backup.SyncedAt
 
-		if e.RefsHash != "" {
-			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.RefsHash {
+		if e.Backup.RefsHash != "" {
+			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.Backup.RefsHash {
 				s.State = StateSynced
 			}
 		}
@@ -112,7 +110,7 @@ func Eval(ctx context.Context, e Entry) Status {
 		return s
 	}
 
-	if meta.ID != e.ID {
+	if meta.ID != e.Backup.ID {
 		s.State = StateError
 		return s
 	}
@@ -124,7 +122,7 @@ func Eval(ctx context.Context, e Entry) Status {
 	}
 
 	s.LastSync = latest.SyncedAt
-	if bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle")); bundles != nil {
+	if bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"+encExt)); bundles != nil {
 		s.Versions = len(bundles)
 	}
 

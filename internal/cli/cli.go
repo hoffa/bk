@@ -23,7 +23,7 @@ import (
 var errUsage = errors.New("usage")
 
 func usage() {
-	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  restore <backup-dir> <restore-path>   restore a backup's latest")
+	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  rm <id>                               remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
 }
 
 // readPassword returns the backup password from $BK_PASSWORD (handy for scripts
@@ -121,8 +121,10 @@ func syncCmd(ctx context.Context, args []string) error {
 	for i := range cfg.Sync {
 		e := &cfg.Sync[i]
 
-		before := *e
-		switch synced, err := bk.Sync(ctx, e, cfg.Key); {
+		firstSync := e.Backup == nil
+		synced, err := bk.Sync(ctx, e, cfg.Key)
+
+		switch {
 		case errors.Is(err, bk.ErrTargetAbsent):
 			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
 		case err != nil:
@@ -135,8 +137,9 @@ func syncCmd(ctx context.Context, args []string) error {
 			fmt.Printf("up to date %s -> %s\n", e.Source, e.Target)
 		}
 
-		if *e != before {
-			dirty = true // first-sync id and/or refs hash recorded
+		// A first sync records the backup cache; a new version updates it.
+		if err == nil && (firstSync || synced) {
+			dirty = true
 		}
 	}
 
@@ -212,6 +215,39 @@ func addCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
+func rmCmd(args []string) error {
+	fs := flag.NewFlagSet("rm", flag.ExitOnError)
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: bk rm <id>")
+		return errUsage
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		return err
+	}
+
+	e, err := cfg.Match(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+
+	source, target := e.Source, e.Target
+
+	cfg.Remove(e.ID)
+
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+
+	// Config entry only; the backup data on the target is left in place.
+	fmt.Printf("removed %s -> %s\n", source, target)
+
+	return nil
+}
+
 func restoreCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
@@ -250,6 +286,8 @@ func run(ctx context.Context, args []string) error {
 		return addCmd(ctx, rest)
 	case "status":
 		return statusCmd(ctx, rest)
+	case "rm":
+		return rmCmd(rest)
 	case "restore":
 		return restoreCmd(ctx, rest)
 	default:

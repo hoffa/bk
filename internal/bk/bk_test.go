@@ -23,7 +23,7 @@ func TestConfigRoundTrip(t *testing.T) {
 		t.Fatalf("expected empty config, got %d entries", len(cfg.Sync))
 	}
 
-	cfg.Sync = append(cfg.Sync, Entry{Source: "/a", Target: "/b", ID: "deadbeef"})
+	cfg.Sync = append(cfg.Sync, Entry{ID: "deadbeef", Source: "/a", Target: "/b"})
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -44,12 +44,28 @@ func TestAdd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(cfg.Sync) != 1 || cfg.Sync[0].ID != "" {
-		t.Fatalf("expected one entry with empty id, got %+v", cfg.Sync)
+	if len(cfg.Sync) != 1 || cfg.Sync[0].ID == "" || cfg.Sync[0].Backup != nil {
+		t.Fatalf("expected one entry with an id and no backup yet, got %+v", cfg.Sync)
 	}
 
 	if err := cfg.Add("/a", "/b"); err == nil {
 		t.Fatal("expected duplicate add to fail")
+	}
+}
+
+func TestMatch(t *testing.T) {
+	c := &Config{Sync: []Entry{{ID: "aaa1"}, {ID: "aaa2"}, {ID: "bbb1"}}}
+
+	if e, err := c.Match("bbb"); err != nil || e.ID != "bbb1" {
+		t.Fatalf("Match(bbb) = %+v, %v; want bbb1", e, err)
+	}
+
+	if _, err := c.Match("aaa"); err == nil {
+		t.Error("Match(aaa) should be ambiguous")
+	}
+
+	if _, err := c.Match("zzz"); err == nil {
+		t.Error("Match(zzz) should not be found")
 	}
 }
 
@@ -85,8 +101,8 @@ func TestSyncEntry(t *testing.T) {
 		t.Fatalf("first sync synced=%v err=%v", synced, err)
 	}
 
-	if e.ID == "" {
-		t.Fatal("first sync did not record the target id")
+	if e.Backup == nil || e.Backup.ID == "" {
+		t.Fatal("first sync did not record the backup id")
 	}
 
 	if _, err := os.Stat(filepath.Join(target, latestFile)); err != nil {
@@ -122,7 +138,7 @@ func TestSyncEntryAbsent(t *testing.T) {
 	}
 
 	// id set but target missing -> absent.
-	e2 := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "missing"), ID: "x"}
+	e2 := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "missing"), Backup: &Backup{ID: "x"}}
 	if _, err := Sync(ctx, &e2, testKey); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
@@ -137,7 +153,7 @@ func TestSyncEntryIDMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := Entry{Source: repo, Target: target, ID: "not-the-real-id"}
+	e := Entry{Source: repo, Target: target, Backup: &Backup{ID: "not-the-real-id"}}
 	if _, err := Sync(ctx, &e, testKey); err == nil || errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want id-mismatch failure, got %v", err)
 	}
@@ -153,7 +169,7 @@ func TestSyncEntryNotABackup(t *testing.T) {
 	repo := initRepo(t)
 	target := t.TempDir() // exists but has no BK_BACKUP.json
 
-	e := Entry{Source: repo, Target: target, ID: "x"}
+	e := Entry{Source: repo, Target: target, Backup: &Backup{ID: "x"}}
 	if _, err := Sync(ctx, &e, testKey); err == nil {
 		t.Fatal("expected failure for non-backup target")
 	}
@@ -360,7 +376,7 @@ func TestEvalStates(t *testing.T) {
 	}
 
 	// Absent target with an id but no refs cache -> out of date (offline).
-	st := Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x"})
+	st := Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x"}})
 	if st.Present || st.State != StateStale {
 		t.Errorf("absent uncached = %q present=%v, want stale offline", st.State.Label(), st.Present)
 	}
@@ -371,9 +387,9 @@ func TestEvalStates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	when := time.Now().UTC().Format(time.RFC3339)
+	when := time.Now().UTC()
 
-	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x", RefsHash: rh, SyncedAt: when})
+	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x", RefsHash: rh, SyncedAt: when}})
 	if st.Present || st.State != StateSynced {
 		t.Errorf("absent cached-current = %q present=%v, want synced offline", st.State.Label(), st.Present)
 	}
@@ -404,7 +420,7 @@ func TestEvalErrors(t *testing.T) {
 	repo := initRepo(t)
 
 	// id set but target has no BK_BACKUP.json.
-	if s := Eval(ctx, Entry{Source: repo, Target: t.TempDir(), ID: "abc"}); s.State != StateError {
+	if s := Eval(ctx, Entry{Source: repo, Target: t.TempDir(), Backup: &Backup{ID: "abc"}}); s.State != StateError {
 		t.Errorf("not-a-backup = %q, want error", s.State.Label())
 	}
 
@@ -414,7 +430,7 @@ func TestEvalErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if s := Eval(ctx, Entry{Source: repo, Target: mismatch, ID: "not-the-real-id"}); s.State != StateError {
+	if s := Eval(ctx, Entry{Source: repo, Target: mismatch, Backup: &Backup{ID: "not-the-real-id"}}); s.State != StateError {
 		t.Errorf("id-mismatch = %q, want error", s.State.Label())
 	}
 

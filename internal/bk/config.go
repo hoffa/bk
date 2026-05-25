@@ -11,24 +11,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/hoffa/bk/internal/crypt"
 	"github.com/hoffa/bk/internal/util"
 )
 
-// Entry is one configured backup: a source repo and a target backup dir. ID is
-// empty until the first sync, which initializes the target and records its
-// BK_BACKUP.json id (trust on first use); later syncs match against it so we
-// never write into a wrong or replaced target. RefsHash and SyncedAt cache the
-// refs fingerprint and time (RFC3339) of the last sync, so currency and last-sync
-// time can be shown while the target is absent (e.g. unplugged); they are empty
-// until the first sync, and the target's latest.json is authoritative when present.
+// Entry is one configured backup. ID is the entry's own stable handle, assigned
+// at Add and used to refer to it (e.g. bk rm). Source and Target are what you
+// declared. Backup is what we last learned from the target, cached for offline
+// verification and status; it's nil until the first sync.
 type Entry struct {
-	Source   string
-	Target   string
-	ID       string
-	RefsHash string
-	SyncedAt string
+	ID     string
+	Source string
+	Target string
+	Backup *Backup
+}
+
+// Backup mirrors what the config caches about a target between syncs so bk can
+// verify and show status while the target is absent. The target's own
+// BK_BACKUP.json / latest.json are authoritative; this is a regenerable cache.
+type Backup struct {
+	ID       string    // the backup's identity, for trust-on-first-use
+	RefsHash string    // refs fingerprint at the last sync
+	SyncedAt time.Time // last sync time
 }
 
 // Config is the whole on-disk config: the set of configured backups plus the
@@ -84,9 +91,9 @@ func (c *Config) Save() error {
 	return util.AtomicWrite(path, append(data, '\n'), 0644)
 }
 
-// Add appends a source -> target backup, returning an error if the exact pair is
-// already configured. The target is initialized on the first Sync, so it need
-// not exist yet. The caller must Save to persist.
+// Add appends a source -> target backup with a fresh handle, returning an error
+// if the exact pair is already configured. The target is initialized on the first
+// Sync, so it need not exist yet. The caller must Save to persist.
 func (c *Config) Add(source, target string) error {
 	for _, e := range c.Sync {
 		if e.Source == source && e.Target == target {
@@ -94,9 +101,49 @@ func (c *Config) Add(source, target string) error {
 		}
 	}
 
-	c.Sync = append(c.Sync, Entry{Source: source, Target: target})
+	id, err := util.RandHex(16)
+	if err != nil {
+		return err
+	}
+
+	c.Sync = append(c.Sync, Entry{ID: id, Source: source, Target: target})
 
 	return nil
+}
+
+// Match returns the single entry whose ID starts with prefix, erroring if no
+// entry matches or more than one does.
+func (c *Config) Match(prefix string) (*Entry, error) {
+	var found *Entry
+
+	for i := range c.Sync {
+		if strings.HasPrefix(c.Sync[i].ID, prefix) {
+			if found != nil {
+				return nil, fmt.Errorf("id %q is ambiguous; it matches more than one backup", prefix)
+			}
+
+			found = &c.Sync[i]
+		}
+	}
+
+	if found == nil {
+		return nil, fmt.Errorf("no backup with id %q", prefix)
+	}
+
+	return found, nil
+}
+
+// Remove drops the entry with the given (exact) ID.
+func (c *Config) Remove(id string) {
+	kept := c.Sync[:0]
+
+	for _, e := range c.Sync {
+		if e.ID != id {
+			kept = append(kept, e)
+		}
+	}
+
+	c.Sync = kept
 }
 
 // HasKey reports whether the encryption keyring has been set up.

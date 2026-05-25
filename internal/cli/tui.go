@@ -282,10 +282,14 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(tickInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-// persistEntry writes a synced entry's id and refs hash back to the config,
-// merging into the current on-disk config so a concurrent `bk add` isn't
-// clobbered.
+// persistEntry writes a freshly-synced entry's learned Backup cache back to the
+// config, matched by the stable entry id, so a concurrent `bk add` (a different
+// entry) isn't clobbered.
 func persistEntry(e bk.Entry) {
+	if e.Backup == nil {
+		return
+	}
+
 	cfg, err := bk.Load()
 	if err != nil {
 		return
@@ -294,23 +298,8 @@ func persistEntry(e bk.Entry) {
 	changed := false
 
 	for i := range cfg.Sync {
-		c := &cfg.Sync[i]
-		if c.Source != e.Source || c.Target != e.Target {
-			continue
-		}
-
-		if c.ID == "" && e.ID != "" {
-			c.ID = e.ID
-			changed = true
-		}
-
-		if e.RefsHash != "" && c.RefsHash != e.RefsHash {
-			c.RefsHash = e.RefsHash
-			changed = true
-		}
-
-		if e.SyncedAt != "" && c.SyncedAt != e.SyncedAt {
-			c.SyncedAt = e.SyncedAt
+		if cfg.Sync[i].ID == e.ID {
+			cfg.Sync[i].Backup = e.Backup
 			changed = true
 		}
 	}

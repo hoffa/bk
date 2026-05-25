@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/hoffa/bk/internal/crypt"
 	"github.com/hoffa/bk/internal/git"
@@ -27,8 +26,8 @@ func CheckRepo(ctx context.Context, path string) error {
 // verifies the target's id matches before syncing. A target that isn't present is
 // reported as ErrTargetAbsent (e.g. an unplugged drive), which callers typically
 // treat as a skip rather than a failure. Bundles are encrypted to the target's
-// own stored keyring, so every version in a target stays decryptable. It updates
-// e.ID, e.RefsHash, and e.SyncedAt in place and reports whether a new version was
+// own stored keyring, so every version in a target stays decryptable. It fills in
+// e.Backup (identity, refs, time) in place and reports whether a new version was
 // written.
 func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 	target, err := filepath.Abs(e.Target)
@@ -36,7 +35,7 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 		return false, err
 	}
 
-	if e.ID == "" {
+	if e.Backup == nil {
 		// First sync: the parent (e.g. a mount point) must exist so we create the
 		// backup on the intended volume, not somewhere a missing mount used to be.
 		if _, err := os.Stat(filepath.Dir(target)); errors.Is(err, os.ErrNotExist) {
@@ -59,10 +58,10 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 		return false, fmt.Errorf("not a valid backup: %w", err)
 	}
 
-	if e.ID == "" {
-		e.ID = meta.ID
-	} else if meta.ID != e.ID {
-		return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
+	if e.Backup == nil {
+		e.Backup = &Backup{ID: meta.ID}
+	} else if meta.ID != e.Backup.ID {
+		return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.Backup.ID, meta.ID)
 	}
 
 	// Encrypt to the target's own keyring (kr seeds a new target; an existing one
@@ -74,8 +73,8 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 	// Cache the synced refs + time so currency and last-sync time are known while
 	// the target is absent.
 	if l, err := readLatest(target); err == nil {
-		e.RefsHash = l.RefsHash
-		e.SyncedAt = l.SyncedAt.UTC().Format(time.RFC3339)
+		e.Backup.RefsHash = l.RefsHash
+		e.Backup.SyncedAt = l.SyncedAt
 	}
 
 	return synced, nil

@@ -251,27 +251,28 @@ func TestSyncEntryCmd(t *testing.T) {
 		t.Fatalf("sync error: %v", r.err)
 	}
 
-	if r.entry.ID == "" {
-		t.Error("first sync should record an id")
+	if r.entry.Backup == nil || r.entry.Backup.ID == "" {
+		t.Error("first sync should record the backup id")
 	}
 }
 
 func TestPersistID(t *testing.T) {
 	useTempConfig(t)
 
-	cfg := &bk.Config{Sync: []bk.Entry{{Source: "/a", Target: "/b"}}}
+	cfg := &bk.Config{Sync: []bk.Entry{{ID: "abc", Source: "/a", Target: "/b"}}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
 
-	persistEntry(bk.Entry{Source: "/a", Target: "/b", ID: "newid"})
+	// persistEntry matches by the entry id and writes back the learned Backup.
+	persistEntry(bk.Entry{ID: "abc", Source: "/a", Target: "/b", Backup: &bk.Backup{ID: "newbackupid"}})
 
 	got, err := bk.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got.Sync[0].ID != "newid" {
-		t.Errorf("config id = %q, want newid", got.Sync[0].ID)
+	if got.Sync[0].Backup == nil || got.Sync[0].Backup.ID != "newbackupid" {
+		t.Errorf("backup id = %+v, want newbackupid", got.Sync[0].Backup)
 	}
 }

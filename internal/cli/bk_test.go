@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hoffa/bk/internal/bk"
 )
 
 // mustRun executes a command in dir and fails the test on error.
@@ -95,6 +97,35 @@ func TestAddRejectsNonRepo(t *testing.T) {
 	err := addCmd(t.Context(), []string{t.TempDir(), filepath.Join(t.TempDir(), "backup")})
 	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Fatalf("want not-a-git-repository error, got %v", err)
+	}
+}
+
+func TestRunRm(t *testing.T) {
+	useTempConfig(t)
+	repo := initRepo(t)
+	target := filepath.Join(t.TempDir(), "backup")
+
+	if err := run(t.Context(), []string{"add", repo, target}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove by an id prefix.
+	if err := run(t.Context(), []string{"rm", cfg.Sync[0].ID[:6]}); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+
+	if cfg, _ := bk.Load(); len(cfg.Sync) != 0 {
+		t.Fatalf("expected entry removed, got %+v", cfg.Sync)
+	}
+
+	// Unknown id errors.
+	if err := run(t.Context(), []string{"rm", "nope"}); err == nil {
+		t.Fatal("expected error removing unknown id")
 	}
 }
 
