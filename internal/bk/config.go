@@ -18,14 +18,16 @@ import (
 // Entry is one configured backup: a source repo and a target backup dir. ID is
 // empty until the first sync, which initializes the target and records its
 // BK_BACKUP.json id (trust on first use); later syncs match against it so we
-// never write into a wrong or replaced target. RefsHash caches the refs
-// fingerprint of the last sync so currency can be shown while the target is
-// absent (e.g. unplugged); the target's latest.json is authoritative when present.
+// never write into a wrong or replaced target. RefsHash and SyncedAt cache the
+// refs fingerprint and time (RFC3339) of the last sync, so currency and last-sync
+// time can be shown while the target is absent (e.g. unplugged); they are empty
+// until the first sync, and the target's latest.json is authoritative when present.
 type Entry struct {
 	Source   string
 	Target   string
 	ID       string
 	RefsHash string
+	SyncedAt string
 }
 
 // Config is the whole on-disk config: the set of configured backups.

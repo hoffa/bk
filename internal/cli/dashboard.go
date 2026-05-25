@@ -56,36 +56,37 @@ func statusCode(s bk.State, present bool) string {
 	}
 }
 
-// badgeWidth is the longest code ("STALE?") plus a space of padding each side.
-const badgeWidth = 8
+// statusDotChar is the fat status dot. U+25CF is present in virtually every
+// font, so it stays broadly compatible.
+const statusDotChar = "●"
 
-// badge renders a status code as a fixed-width reverse-video cell, like a test
-// runner's PASS/FAIL. Bubble Tea downsamples the color to the terminal's profile
-// (and drops it under NO_COLOR), so it degrades to plain ASCII.
-func badge(s bk.State, present bool) string {
-	c := color.Color(lipgloss.BrightBlack) // grey: never synced / checking
-
+// statusDot maps a backup's currency + presence to a colored dot: green synced,
+// yellow stale, red error, grey never-synced. An absent (offline) target is
+// dimmed (muted green / muted yellow) so present/absent reads at a glance while
+// still showing the cached verdict.
+func statusDot(s bk.State, present bool) string {
 	switch s {
-	case bk.StateSynced:
-		c = lipgloss.Green
-	case bk.StateStale:
-		c = lipgloss.Yellow
 	case bk.StateError:
-		c = lipgloss.Red
+		return dot(lipgloss.Red, false)
+	case bk.StateSynced:
+		return dot(lipgloss.Green, !present)
+	case bk.StateStale:
+		return dot(lipgloss.Yellow, !present)
+	default: // never synced / checking
+		return dot(lipgloss.BrightBlack, false)
 	}
-
-	return styleBadge(c, statusCode(s, present))
 }
 
-// styleBadge renders text left-aligned in a fixed-width cell. The color is shown
-// via reverse video, so it becomes the background and the text is the terminal's
-// own background color -- theme-adaptive for every state.
-func styleBadge(c color.Color, text string) string {
-	return lipgloss.NewStyle().
-		Reverse(true).
-		Foreground(c).
-		Width(badgeWidth).
-		Render(" " + text)
+// dot renders the status dot in color c; faint dims it (for offline targets).
+// Bubble Tea downsamples the color to the terminal's profile and drops it under
+// NO_COLOR, leaving a plain dot.
+func dot(c color.Color, faint bool) string {
+	style := lipgloss.NewStyle().Foreground(c)
+	if faint {
+		style = style.Faint(true)
+	}
+
+	return style.Render(statusDotChar)
 }
 
 // isTerminal reports whether w is a character device (a terminal).

@@ -137,15 +137,16 @@ func TestModelView(t *testing.T) {
 	m := newModel(status("/src", "/dst", bk.StateSynced))
 
 	v := m.View().Content
-	for _, want := range []string{"/src", "/dst", "OK", "auto-sync", "q: quit"} {
+	for _, want := range []string{"/src", "/dst", statusDotChar, "auto-sync", "q: quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}
 	}
 
+	// Syncing recolors the dot (cyan), so the rendered view changes.
 	m.syncing[entryKey(m.statuses[0].Entry)] = true
-	if !strings.Contains(m.View().Content, "SYNC") {
-		t.Errorf("view should show a SYNC badge:\n%s", m.View().Content)
+	if m.View().Content == v {
+		t.Error("syncing should change the status dot")
 	}
 
 	if !strings.Contains(newModel().View().Content, "no backups configured") {
@@ -155,6 +156,27 @@ func TestModelView(t *testing.T) {
 	m.quitting = true
 	if m.View().Content != "" {
 		t.Errorf("quitting view should be empty, got %q", m.View().Content)
+	}
+}
+
+func TestWithTilde(t *testing.T) {
+	const home = "/home/u"
+
+	cases := map[string]string{
+		home:                "~",           // the home dir itself
+		home + "/code/proj": "~/code/proj", // under home
+		"/var/data":         "/var/data",   // elsewhere
+		"/home/user2/x":     "/home/user2/x",
+	}
+	for in, want := range cases {
+		if got := withTilde(in, home); got != want {
+			t.Errorf("withTilde(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// No home: unchanged.
+	if got := withTilde("/a/b", ""); got != "/a/b" {
+		t.Errorf("withTilde with empty home = %q, want /a/b", got)
 	}
 }
 

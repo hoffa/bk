@@ -32,22 +32,22 @@ func TestStatusCode(t *testing.T) {
 	}
 }
 
-func TestBadge(t *testing.T) {
-	// Every badge has a fixed visible width (lipgloss.Width ignores any color
-	// escapes) and carries its code text.
+func TestStatusDot(t *testing.T) {
+	// Every state renders the single-cell dot glyph.
 	for _, s := range []bk.State{bk.StateSynced, bk.StateStale, bk.StateUnsynced, bk.StateError} {
-		b := badge(s, true)
-		if w := lipgloss.Width(b); w != badgeWidth {
-			t.Errorf("badge for %s visible width = %d, want %d", s.Label(), w, badgeWidth)
+		d := statusDot(s, true)
+		if !strings.Contains(d, statusDotChar) {
+			t.Errorf("dot for %s missing glyph: %q", s.Label(), d)
+		}
+
+		if w := lipgloss.Width(d); w != 1 {
+			t.Errorf("dot for %s visible width = %d, want 1", s.Label(), w)
 		}
 	}
 
-	if !strings.Contains(badge(bk.StateSynced, true), "OK") {
-		t.Errorf("badge missing code text: %q", badge(bk.StateSynced, true))
-	}
-
-	if !strings.Contains(badge(bk.StateError, true), "ERROR") {
-		t.Errorf("error badge missing code text: %q", badge(bk.StateError, true))
+	// An absent (offline) target dims the dot, so it differs from the online one.
+	if statusDot(bk.StateSynced, true) == statusDot(bk.StateSynced, false) {
+		t.Error("offline dot should render faint, differently from online")
 	}
 }
 

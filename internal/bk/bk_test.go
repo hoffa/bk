@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoffa/bk/internal/git"
 )
@@ -347,9 +348,15 @@ func TestEvalStates(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	// Never synced (id empty, parent exists).
-	if s := Eval(ctx, Entry{Source: repo, Target: target}); s.State != StateUnsynced {
-		t.Errorf("fresh entry = %q, want never synced", s.State.Label())
+	// Never synced (id empty, parent exists). Present is true even though the
+	// target doesn't exist yet, because its parent does -- so auto-sync can run.
+	if s := Eval(ctx, Entry{Source: repo, Target: target}); s.State != StateUnsynced || !s.Present {
+		t.Errorf("fresh entry = %q present=%v, want never synced + present", s.State.Label(), s.Present)
+	}
+
+	// Never synced with a missing parent (e.g. drive unmounted) is not present.
+	if s := Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone", "backup")}); s.Present {
+		t.Error("fresh entry with missing parent should not be present")
 	}
 
 	// Absent target with an id but no refs cache -> out of date (offline).
@@ -364,9 +371,15 @@ func TestEvalStates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x", RefsHash: rh})
+	when := time.Now().UTC().Format(time.RFC3339)
+
+	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x", RefsHash: rh, SyncedAt: when})
 	if st.Present || st.State != StateSynced {
 		t.Errorf("absent cached-current = %q present=%v, want synced offline", st.State.Label(), st.Present)
+	}
+	// The cached sync time is surfaced even though the target is absent.
+	if st.LastSync.IsZero() {
+		t.Error("absent entry should report the cached last-sync time")
 	}
 
 	// Synced after a sync, stale after a new commit.

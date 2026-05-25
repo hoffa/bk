@@ -68,10 +68,15 @@ func Eval(ctx context.Context, e Entry) Status {
 	s.Present = util.Exists(target)
 
 	if e.ID == "" {
-		// Never synced. If the target exists but isn't safe to initialize
-		// (non-empty, not a backup), surface an error instead of NEW so we don't
-		// keep trying to write into it.
-		if s.Present {
+		// Never synced. The first sync creates the target, so "reachable" means
+		// the parent (e.g. a mount point) exists -- not the target itself, which
+		// won't exist yet. Without this, auto-sync would never fire on a fresh add.
+		s.Present = util.Exists(filepath.Dir(target))
+
+		// If the target already exists but isn't safe to initialize (non-empty,
+		// not a backup), surface an error instead of NEW so we don't keep trying
+		// to write into it.
+		if util.Exists(target) {
 			if ok, err := backupDirUsable(target); err != nil || !ok {
 				s.State = StateError
 				return s
@@ -84,8 +89,12 @@ func Eval(ctx context.Context, e Entry) Status {
 	}
 
 	if !s.Present {
-		// Offline: judge currency from the cached last-synced refs.
+		// Offline: judge currency from the cached last-synced refs, and show the
+		// cached last-sync time (how stale this unplugged copy is).
 		s.State = StateStale
+		if t, err := time.Parse(time.RFC3339, e.SyncedAt); err == nil {
+			s.LastSync = t
+		}
 
 		if e.RefsHash != "" {
 			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.RefsHash {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 
 // tickInterval is how often the TUI reloads the config and re-checks backups.
 const tickInterval = 2 * time.Second
+
+// muted dims secondary text (separators, timestamps, the help bar) so the dots
+// and paths stand out.
+var muted = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
 
 // entryKey identifies a configured entry stably across config reloads, so
 // syncing state survives entries being added or removed between ticks.
@@ -130,26 +135,29 @@ func (m tuiModel) View() tea.View {
 	lines := 0
 
 	if len(m.statuses) == 0 {
-		b.WriteString("no backups configured; add one with: bk add <repo> <backup-dir>\n")
+		b.WriteString(muted.Render("no backups configured; add one with: bk add <repo> <backup-dir>") + "\n")
 
 		lines++
 	} else {
-		// Manual column widths from visible text: colored badges contain ANSI
-		// escapes, so tabwriter can't measure them. Badges are a fixed visible
-		// width, so the rest aligns when padded by source/target length.
+		home, _ := os.UserHomeDir()
+
+		// Manual column widths from visible text: the colored dot contains ANSI
+		// escapes (and is a single cell), so we pad source/target by length.
 		srcW, tgtW := 0, 0
 		for _, s := range m.statuses {
-			srcW = max(srcW, len(s.Source))
-			tgtW = max(tgtW, len(s.Target))
+			srcW = max(srcW, len(withTilde(s.Source, home)))
+			tgtW = max(tgtW, len(withTilde(s.Target, home)))
 		}
 
 		for _, s := range m.statuses {
-			bg := badge(s.State, s.Present)
+			d := statusDot(s.State, s.Present)
 			if m.syncing[entryKey(s.Entry)] {
-				bg = styleBadge(lipgloss.Cyan, "SYNC")
+				d = dot(lipgloss.Cyan, false)
 			}
 
-			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.LastSync))
+			_, _ = fmt.Fprintf(&b, "%s %-*s %s %-*s  %s\n",
+				d, srcW, withTilde(s.Source, home), muted.Render("→"),
+				tgtW, withTilde(s.Target, home), muted.Render(relTime(s.LastSync)))
 			lines++
 		}
 	}
@@ -182,15 +190,17 @@ func (m tuiModel) startSyncs() tea.Cmd {
 // statusBar renders the bottom row: auto-sync state flush-left, help
 // flush-right, padded to the window width and pinned to the last terminal row.
 func (m tuiModel) statusBar(bodyLines int) string {
-	mode := "off"
+	mode := muted.Render("off")
 	if m.autoSync {
-		mode = "on"
+		mode = lipgloss.NewStyle().Foreground(lipgloss.Green).Render("on")
 	}
 
-	left := "auto-sync: " + mode
-	right := "a: toggle auto-sync  q: quit"
+	left := muted.Render("auto-sync: ") + mode
+	right := muted.Render("a: toggle auto-sync  q: quit")
 
-	gap := max(m.width-len(left)-len(right), 2)
+	// Measure visible width (Width ignores the color escapes) to size the gap so
+	// the help stays flush-right.
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right), 2)
 
 	bar := left + strings.Repeat(" ", gap) + right
 
@@ -198,6 +208,25 @@ func (m tuiModel) statusBar(bodyLines int) string {
 	blanks := max(1, m.height-bodyLines-1)
 
 	return strings.Repeat("\n", blanks) + bar
+}
+
+// withTilde abbreviates a home-relative path with "~" for display. Config paths
+// are absolute, so this is purely cosmetic and reversible.
+func withTilde(p, home string) string {
+	if home == "" {
+		return p
+	}
+
+	if p == home {
+		return "~"
+	}
+
+	sep := string(os.PathSeparator)
+	if rest, ok := strings.CutPrefix(p, home+sep); ok {
+		return "~" + sep + rest
+	}
+
+	return p
 }
 
 // relTime renders a sync time as a short relative string.
@@ -270,6 +299,11 @@ func persistEntry(e bk.Entry) {
 
 		if e.RefsHash != "" && c.RefsHash != e.RefsHash {
 			c.RefsHash = e.RefsHash
+			changed = true
+		}
+
+		if e.SyncedAt != "" && c.SyncedAt != e.SyncedAt {
+			c.SyncedAt = e.SyncedAt
 			changed = true
 		}
 	}

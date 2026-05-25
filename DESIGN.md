@@ -1,22 +1,39 @@
 # Design
 
-## Status badges
+## Status colors
 
-The dashboard shows each backup as a colored status badge (ASCII, like a test
-runner's PASS/FAIL). The code is the verdict, the color reinforces it, and a
-trailing `?` means *unverified* — the target is absent, so the verdict is
-inferred from the last sync recorded in the config rather than confirmed against
-the target itself.
+A backup's currency is a color:
 
-| Badge    | Color  | Meaning                                                       |
-| -------- | ------ | ------------------------------------------------------------ |
-| `OK`     | green  | synced to the latest commit, verified against the target     |
-| `OK?`    | green  | believed synced to the latest commit, but offline so unverified |
-| `STALE`  | yellow | confirmed out of date — target present, repo has new commits |
-| `STALE?` | yellow | believed out of date (from the last sync), but offline so unverified |
-| `NEW`    | grey   | never synced                                                 |
-| `ERR`    | red    | error (id mismatch, not a backup, unreadable source)         |
+| Color  | Meaning                                                       |
+| ------ | ------------------------------------------------------------ |
+| green  | synced — source refs match what was last backed up           |
+| yellow | stale — the source has commits not yet backed up             |
+| grey   | never synced                                                 |
+| red    | error (id mismatch, not a backup, unreadable source)         |
+| cyan   | syncing right now (dashboard only, transient)                |
 
-"Latest" means the source repo's refs match what was last backed up. When the
-target is present this is verified against it; when absent it is inferred from
-the cached refs, hence the `?`.
+When the target is **present**, green/yellow are verified against it. When the
+target is **absent** (e.g. an unplugged drive) the verdict is inferred from the
+cached refs hash and shown **dimmed** — a muted green still means "your work is
+safe on a drive that's just unplugged". Errors are always red.
+
+### Live dashboard (`bk` in a terminal)
+
+Each backup is a fat status dot (`●`) in the color above; an absent target dims
+the dot. So a bright green dot is "synced and plugged in", a dim green dot is
+"safe but unplugged", grey is never synced, red is broken.
+
+### Plain output (`bk status`, piped, or CI)
+
+A colorless text table carries more nuance than the dot: short ASCII codes, with
+a trailing `?` meaning *unverified* (target absent, verdict inferred from the
+cached refs):
+
+| Code     | Meaning                                                       |
+| -------- | ------------------------------------------------------------ |
+| `OK`     | synced, verified against the target                          |
+| `OK?`    | believed synced, but offline so unverified                   |
+| `STALE`  | confirmed out of date — target present, repo has new commits |
+| `STALE?` | believed out of date (from the last sync), but offline       |
+| `NEW`    | never synced                                                  |
+| `ERROR`  | error                                                         |

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Sync backs up a single configured entry. On the first sync (empty ID) it
@@ -60,9 +61,11 @@ func Sync(ctx context.Context, e *Entry) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// Cache the synced refs so currency is known while the target is absent.
+	// Cache the synced refs + time so currency and last-sync time are known while
+	// the target is absent.
 	if l, err := readLatest(target); err == nil {
 		e.RefsHash = l.RefsHash
+		e.SyncedAt = l.SyncedAt.UTC().Format(time.RFC3339)
 	}
 
 	return synced, nil
