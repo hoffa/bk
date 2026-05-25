@@ -28,8 +28,9 @@ func evalAll(ctx context.Context) ([]bk.Status, error) {
 
 // printStatus writes entry statuses as headerless TSV (the TUI is the pretty
 // view; this is the scriptable one). No header means every line is a record, so
-// cut/awk/read consume it without skipping. Columns are, in order: id, source,
-// target, state, last sync (RFC 3339, or empty if never).
+// cut/awk/read consume it without skipping. Columns are, in order: id, state,
+// source, target, last sync (RFC 3339, or empty if never) -- id, state first to
+// match `bk sync`.
 func printStatus(w io.Writer, statuses []bk.Status) error {
 	for _, s := range statuses {
 		var last string
@@ -37,7 +38,7 @@ func printStatus(w io.Writer, statuses []bk.Status) error {
 			last = s.LastSync.Format(time.RFC3339)
 		}
 
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Source, s.Target, statusCode(s.State, s.Present), last)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, statusCode(s.State, s.Present), s.Source, s.Target, last)
 	}
 
 	return nil

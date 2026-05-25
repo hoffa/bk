@@ -54,7 +54,7 @@ bk status
 ```
 
 This prints headerless, tab-separated records (one per backup) for easy
-`cut`/`awk`/`read` — columns are id, source, target, state, last sync. The state
+`cut`/`awk`/`read` — columns are id, state, source, target, last sync. The state
 is one of:
 
 - `SYNCED` up to date · `STALE` out of date · `NEW` never synced · `ERROR` error

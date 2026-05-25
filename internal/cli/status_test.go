@@ -51,7 +51,8 @@ func TestPrintStatus(t *testing.T) {
 		t.Errorf("expected no header row:\n%s", out)
 	}
 
-	if !strings.Contains(out, "/a\t/b\t") {
-		t.Errorf("expected tab-separated fields:\n%s", out)
+	// Column order: id, state, source, target, last sync.
+	if !strings.Contains(out, "0123456789abcdef0123\tSYNCED_ONLINE\t/a\t/b\t") {
+		t.Errorf("unexpected column order:\n%s", out)
 	}
 }
