@@ -70,6 +70,12 @@ func TestE2E(t *testing.T) {
 	backup := filepath.Join(t.TempDir(), "backup")
 	restore := filepath.Join(t.TempDir(), "restored")
 
+	t.Run("init ok", func(t *testing.T) {
+		if out, code := runBin(t, "init"); code != 0 {
+			t.Fatalf("exit %d, want 0\n%s", code, out)
+		}
+	})
+
 	t.Run("add ok", func(t *testing.T) {
 		if out, code := runBin(t, "add", repo, backup); code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)

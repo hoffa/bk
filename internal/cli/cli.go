@@ -23,7 +23,7 @@ import (
 var errUsage = errors.New("usage")
 
 func usage() {
-	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  rm <id>                               remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
+	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  init                                  set the backup password (run once)\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  rm <id>                               remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
 }
 
 // readPassword returns the backup password from $BK_PASSWORD (handy for scripts
@@ -185,19 +185,8 @@ func addCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// First backup ever: set the password that all backups are encrypted with.
 	if !cfg.HasKey() {
-		pw, err := readNewPassword()
-		if err != nil {
-			return err
-		}
-
-		if err := cfg.SetPassword(pw); err != nil {
-			return err
-		}
-
-		fmt.Println("Backups are encrypted with this password.")
-		fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
+		return errors.New("no backup password set; run 'bk init' first")
 	}
 
 	// Pure config: the target is initialized on first sync, so it need not be
@@ -211,6 +200,43 @@ func addCmd(ctx context.Context, args []string) error {
 	}
 
 	fmt.Printf("added %s -> %s (run 'bk sync' to back up)\n", source, target)
+
+	return nil
+}
+
+func initCmd(args []string) error {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: bk init")
+		return errUsage
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		return err
+	}
+
+	if cfg.HasKey() {
+		return errors.New("already initialized")
+	}
+
+	pw, err := readNewPassword()
+	if err != nil {
+		return err
+	}
+
+	if err := cfg.SetPassword(pw); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+
+	fmt.Println("Initialized. Backups are encrypted with this password.")
+	fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
 
 	return nil
 }
@@ -280,6 +306,8 @@ func run(ctx context.Context, args []string) error {
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
+	case "init":
+		return initCmd(rest)
 	case "sync":
 		return syncCmd(ctx, rest)
 	case "add":

@@ -63,7 +63,21 @@ func useTempConfig(t *testing.T) string {
 
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("BK_CONFIG", path)
-	t.Setenv("BK_PASSWORD", "test-password") // non-interactive add/restore
+	t.Setenv("BK_PASSWORD", "test-password") // non-interactive restore
+
+	// Initialize the keyring up front, as `bk init` would.
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cfg.SetPassword("test-password"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
 
 	return path
 }
@@ -97,6 +111,37 @@ func TestAddRejectsNonRepo(t *testing.T) {
 	err := addCmd(t.Context(), []string{t.TempDir(), filepath.Join(t.TempDir(), "backup")})
 	if err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Fatalf("want not-a-git-repository error, got %v", err)
+	}
+}
+
+func TestInit(t *testing.T) {
+	t.Setenv("BK_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Setenv("BK_PASSWORD", "pw")
+
+	repo := initRepo(t)
+	target := filepath.Join(t.TempDir(), "backup")
+
+	// add before init fails (the source is a valid repo, so it's the keyring).
+	if err := run(t.Context(), []string{"add", repo, target}); err == nil {
+		t.Fatal("add before init should fail")
+	}
+
+	if err := run(t.Context(), []string{"init"}); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	if cfg, _ := bk.Load(); !cfg.HasKey() {
+		t.Fatal("init did not set a keyring")
+	}
+
+	// Re-init errors.
+	if err := run(t.Context(), []string{"init"}); err == nil {
+		t.Fatal("re-init should fail")
+	}
+
+	// add now works.
+	if err := run(t.Context(), []string{"add", repo, target}); err != nil {
+		t.Fatalf("add after init: %v", err)
 	}
 }
 
