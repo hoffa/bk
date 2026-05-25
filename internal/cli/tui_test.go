@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/hoffa/bk/internal/bk"
 )
@@ -60,7 +60,7 @@ func TestModelRefreshAutoSync(t *testing.T) {
 func TestModelToggleAutoSync(t *testing.T) {
 	stale := status("/a", "/b", bk.StateUnsynced)
 	m := newModel(stale)
-	keyA := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
+	keyA := tea.KeyPressMsg{Code: 'a', Text: "a"}
 
 	updated, cmd := m.Update(keyA)
 
@@ -116,10 +116,10 @@ func TestModelSyncResultSynced(t *testing.T) {
 }
 
 func TestModelQuit(t *testing.T) {
-	keys := []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune("q")},
-		{Type: tea.KeyCtrlC},
-		{Type: tea.KeyEsc},
+	keys := []tea.KeyPressMsg{
+		{Code: 'q', Text: "q"},
+		{Code: 'c', Mod: tea.ModCtrl},
+		{Code: tea.KeyEscape},
 	}
 	for _, k := range keys {
 		updated, cmd := newModel(status("/a", "/b", bk.StateSynced)).Update(k)
@@ -127,7 +127,7 @@ func TestModelQuit(t *testing.T) {
 			t.Errorf("key %q: expected quitting", k.String())
 		}
 
-		if cmd == nil || cmd() != tea.QuitMsg(struct{}{}) {
+		if cmd == nil || cmd() != (tea.QuitMsg{}) {
 			t.Errorf("key %q: expected tea.Quit command", k.String())
 		}
 	}
@@ -136,7 +136,7 @@ func TestModelQuit(t *testing.T) {
 func TestModelView(t *testing.T) {
 	m := newModel(status("/src", "/dst", bk.StateSynced))
 
-	v := m.View()
+	v := m.View().Content
 	for _, want := range []string{"/src", "/dst", "OK", "auto-sync", "q: quit"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
@@ -144,17 +144,17 @@ func TestModelView(t *testing.T) {
 	}
 
 	m.syncing[entryKey(m.statuses[0].Entry)] = true
-	if !strings.Contains(m.View(), "SYNC") {
-		t.Errorf("view should show a SYNC badge:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "SYNC") {
+		t.Errorf("view should show a SYNC badge:\n%s", m.View().Content)
 	}
 
-	if !strings.Contains(newModel().View(), "no backups configured") {
+	if !strings.Contains(newModel().View().Content, "no backups configured") {
 		t.Error("empty view should show add hint")
 	}
 
 	m.quitting = true
-	if m.View() != "" {
-		t.Errorf("quitting view should be empty, got %q", m.View())
+	if m.View().Content != "" {
+		t.Errorf("quitting view should be empty, got %q", m.View().Content)
 	}
 }
 

@@ -1,10 +1,13 @@
-package main
+package cli
 
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io"
 	"os"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/hoffa/bk/internal/bk"
 )
@@ -56,38 +59,33 @@ func statusCode(s bk.State, present bool) string {
 // badgeWidth is the longest code ("STALE?") plus a space of padding each side.
 const badgeWidth = 8
 
-// badge renders a status code as a fixed-width cell, colored as a background
-// badge (like a test runner's PASS/FAIL) when color is enabled.
-func badge(color bool, s bk.State, present bool) string {
-	return badgeText(color, badgeColor(s), statusCode(s, present))
-}
+// badge renders a status code as a fixed-width reverse-video cell, like a test
+// runner's PASS/FAIL. Bubble Tea downsamples the color to the terminal's profile
+// (and drops it under NO_COLOR), so it degrades to plain ASCII.
+func badge(s bk.State, present bool) string {
+	c := color.Color(lipgloss.BrightBlack) // grey: never synced / checking
 
-// badgeText renders text left-aligned in a fixed-width badge using the given
-// foreground color plus reverse video, so the color becomes the background and
-// the text is the terminal's own background color -- consistent and
-// theme-adaptive for every state.
-func badgeText(color bool, ansiColor, text string) string {
-	cell := fmt.Sprintf(" %-*s", badgeWidth-1, text) // leading space, padded right
-	if !color {
-		return cell
-	}
-
-	return "\033[" + ansiColor + ";7m" + cell + "\033[0m"
-}
-
-// badgeColor is the ANSI foreground color for a state's badge (reverse video
-// turns it into the background).
-func badgeColor(s bk.State) string {
 	switch s {
 	case bk.StateSynced:
-		return "32" // green
+		c = lipgloss.Green
 	case bk.StateStale:
-		return "33" // yellow
+		c = lipgloss.Yellow
 	case bk.StateError:
-		return "31" // red
-	default: // unsynced, checking
-		return "90" // grey
+		c = lipgloss.Red
 	}
+
+	return styleBadge(c, statusCode(s, present))
+}
+
+// styleBadge renders text left-aligned in a fixed-width cell. The color is shown
+// via reverse video, so it becomes the background and the text is the terminal's
+// own background color -- theme-adaptive for every state.
+func styleBadge(c color.Color, text string) string {
+	return lipgloss.NewStyle().
+		Reverse(true).
+		Foreground(c).
+		Width(badgeWidth).
+		Render(" " + text)
 }
 
 // isTerminal reports whether w is a character device (a terminal).

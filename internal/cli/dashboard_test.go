@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 
 	"github.com/hoffa/bk/internal/bk"
 )
@@ -31,24 +33,21 @@ func TestStatusCode(t *testing.T) {
 }
 
 func TestBadge(t *testing.T) {
-	// Plain badge: ASCII only, fixed-width, no escapes.
+	// Every badge has a fixed visible width (lipgloss.Width ignores any color
+	// escapes) and carries its code text.
 	for _, s := range []bk.State{bk.StateSynced, bk.StateStale, bk.StateUnsynced, bk.StateError} {
-		plain := badge(false, s, true)
-		if len(plain) != 8 {
-			t.Errorf("plain badge for %s = %q (width %d, want 8)", s.Label(), plain, len(plain))
-		}
-
-		if strings.Contains(plain, "\033[") {
-			t.Errorf("plain badge should have no color: %q", plain)
+		b := badge(s, true)
+		if w := lipgloss.Width(b); w != badgeWidth {
+			t.Errorf("badge for %s visible width = %d, want %d", s.Label(), w, badgeWidth)
 		}
 	}
 
-	if !strings.Contains(badge(false, bk.StateSynced, true), "OK") {
-		t.Error("badge missing code text")
+	if !strings.Contains(badge(bk.StateSynced, true), "OK") {
+		t.Errorf("badge missing code text: %q", badge(bk.StateSynced, true))
 	}
-	// Colored badge wraps the code in an ANSI background.
-	if c := badge(true, bk.StateError, true); !strings.Contains(c, "ERR") || !strings.Contains(c, "\033[") {
-		t.Errorf("colored badge = %q", c)
+
+	if !strings.Contains(badge(bk.StateError, true), "ERROR") {
+		t.Errorf("error badge missing code text: %q", badge(bk.StateError, true))
 	}
 }
 

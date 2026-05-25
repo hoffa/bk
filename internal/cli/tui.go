@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/hoffa/bk/internal/bk"
 )
@@ -53,7 +54,7 @@ func runTUI(ctx context.Context) error {
 	defer cancel()
 
 	m := tuiModel{ctx: ctx, cancel: cancel, syncing: map[string]bool{}}
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(m).Run() // alt screen is set on the View
 
 	return err
 }
@@ -64,7 +65,7 @@ func (m tuiModel) Init() tea.Cmd {
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			m.quitting = true
@@ -119,9 +120,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) View() string {
+func (m tuiModel) View() tea.View {
 	if m.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	var b strings.Builder
@@ -143,9 +144,9 @@ func (m tuiModel) View() string {
 		}
 
 		for _, s := range m.statuses {
-			bg := badge(true, s.State, s.Present)
+			bg := badge(s.State, s.Present)
 			if m.syncing[entryKey(s.Entry)] {
-				bg = badgeText(true, "36", "SYNC") // cyan
+				bg = styleBadge(lipgloss.Cyan, "SYNC")
 			}
 
 			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.LastSync))
@@ -155,7 +156,10 @@ func (m tuiModel) View() string {
 
 	b.WriteString(m.statusBar(lines))
 
-	return b.String()
+	v := tea.NewView(b.String())
+	v.AltScreen = true // full-window mode
+
+	return v
 }
 
 // startSyncs kicks off syncs for every out-of-date entry not already syncing.

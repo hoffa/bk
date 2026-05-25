@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"errors"
@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 	// may still override BK_CONFIG via t.Setenv.
 	_ = os.Setenv("BK_CONFIG", filepath.Join(dir, "config.json"))
 
-	build := exec.Command("go", "build", "-o", bkBin, ".")
+	build := exec.Command("go", "build", "-o", bkBin, "github.com/hoffa/bk")
 
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
