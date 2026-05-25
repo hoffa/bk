@@ -26,6 +26,11 @@ import (
 // process should exit with status 2.
 var errUsage = errors.New("usage")
 
+// errReported signals failure that has already been communicated through the
+// command's own output (e.g. per-entry ERROR rows from `bk sync`): exit non-zero
+// without printing anything further.
+var errReported = errors.New("reported")
+
 // command is one subcommand. args is the usage hint shown after the name; run
 // receives the arguments after the command name.
 type command struct {
@@ -245,12 +250,18 @@ func syncCmd(ctx context.Context, args []string) error {
 		return fmt.Errorf("no sync entries in %s; add one with: bk add <repo> <backup-dir>", path)
 	}
 
-	// Sync each entry, reporting progress. A missing target (unplugged drive) is
-	// a skip, not a failure; other errors are reported but don't stop the rest.
+	// Sync each entry, emitting "<id>\t<status>\t<msg>" TSV like `bk status` (the
+	// scriptable surface). status uses the same vocabulary as `bk status`: a
+	// reached target is reported online, an absent one (unplugged drive) falls
+	// back to its cached offline verdict -- not a failure. A real failure is
+	// ERROR with the detail in msg (one-lined so it can't break the TSV); it
+	// doesn't stop the rest, but makes the run exit non-zero.
 	var (
 		failed int
 		dirty  bool
 	)
+
+	oneLine := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 
 	for i := range cfg.Sync {
 		e := &cfg.Sync[i]
@@ -258,18 +269,21 @@ func syncCmd(ctx context.Context, args []string) error {
 		firstSync := e.Backup == nil
 		synced, err := bk.Sync(ctx, e, cfg.Key)
 
-		switch {
-		case errors.Is(err, bk.ErrTargetAbsent):
-			fmt.Printf("%s %s -> %s: target not present\n", paint(os.Stdout, lipgloss.BrightBlack, "skip"), e.Source, e.Target)
-		case err != nil:
-			fmt.Fprintf(os.Stderr, "%s %s -> %s: %v\n", paint(os.Stderr, lipgloss.Red, "error"), e.Source, e.Target, err)
+		var status, msg string
 
+		switch {
+		case err != nil && !errors.Is(err, bk.ErrTargetAbsent):
+			status, msg = "ERROR", oneLine.Replace(err.Error())
 			failed++
-		case synced:
-			fmt.Printf("%s %s -> %s\n", paint(os.Stdout, lipgloss.Green, "synced"), e.Source, e.Target)
 		default:
-			fmt.Printf("%s %s -> %s\n", paint(os.Stdout, lipgloss.BrightBlack, "up to date"), e.Source, e.Target)
+			// Success, or target absent: report the entry's resulting status the
+			// same way `bk status` would (online if reached, the cached offline
+			// verdict if it wasn't present).
+			s := bk.Eval(ctx, *e)
+			status = statusCode(s.State, s.Present)
 		}
+
+		fmt.Printf("%s\t%s\t%s\n", e.ID, status, msg)
 
 		// A first sync records the backup cache; a new version updates it.
 		if err == nil && (firstSync || synced) {
@@ -284,7 +298,7 @@ func syncCmd(ctx context.Context, args []string) error {
 	}
 
 	if failed > 0 {
-		return fmt.Errorf("%d of %d entries failed", failed, len(cfg.Sync))
+		return errReported
 	}
 
 	return nil
@@ -382,6 +396,8 @@ func Main(args []string) int {
 		return 0
 	case errors.Is(err, errUsage):
 		return 2
+	case errors.Is(err, errReported):
+		return 1
 	default:
 		fmt.Fprintln(os.Stderr, paint(os.Stderr, lipgloss.Red, "error:"), err)
 		return 1
