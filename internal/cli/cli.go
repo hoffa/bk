@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"golang.org/x/term"
+
 	"github.com/hoffa/bk/internal/bk"
 )
 
@@ -22,6 +24,50 @@ var errUsage = errors.New("usage")
 
 func usage() {
 	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  restore <backup-dir> <restore-path>   restore a backup's latest")
+}
+
+// readPassword returns the backup password from $BK_PASSWORD (handy for scripts
+// and tests), otherwise it prompts on the terminal without echoing.
+func readPassword(prompt string) (string, error) {
+	if p := os.Getenv("BK_PASSWORD"); p != "" {
+		return p, nil
+	}
+
+	fmt.Fprint(os.Stderr, prompt)
+
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+
+	fmt.Fprintln(os.Stderr)
+
+	return string(b), err
+}
+
+// readNewPassword prompts for a new backup password, confirmed twice. Any
+// non-empty password is accepted.
+func readNewPassword() (string, error) {
+	if p := os.Getenv("BK_PASSWORD"); p != "" {
+		return p, nil
+	}
+
+	pw, err := readPassword("Set a backup password: ")
+	if err != nil {
+		return "", err
+	}
+
+	if pw == "" {
+		return "", errors.New("password cannot be empty")
+	}
+
+	again, err := readPassword("Confirm password: ")
+	if err != nil {
+		return "", err
+	}
+
+	if pw != again {
+		return "", errors.New("passwords do not match")
+	}
+
+	return pw, nil
 }
 
 func statusCmd(ctx context.Context, args []string) error {
@@ -76,7 +122,7 @@ func syncCmd(ctx context.Context, args []string) error {
 		e := &cfg.Sync[i]
 
 		before := *e
-		switch synced, err := bk.Sync(ctx, e); {
+		switch synced, err := bk.Sync(ctx, e, cfg.Key); {
 		case errors.Is(err, bk.ErrTargetAbsent):
 			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
 		case err != nil:
@@ -131,6 +177,21 @@ func addCmd(args []string) error {
 		return err
 	}
 
+	// First backup ever: set the password that all backups are encrypted with.
+	if !cfg.HasKey() {
+		pw, err := readNewPassword()
+		if err != nil {
+			return err
+		}
+
+		if err := cfg.SetPassword(pw); err != nil {
+			return err
+		}
+
+		fmt.Println("Backups are encrypted with this password.")
+		fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
+	}
+
 	// Pure config: the target is initialized on first sync, so it need not be
 	// present now.
 	if err := cfg.Add(source, target); err != nil {
@@ -155,7 +216,12 @@ func restoreCmd(ctx context.Context, args []string) error {
 		return errUsage
 	}
 
-	if err := bk.Restore(ctx, fs.Arg(0), fs.Arg(1)); err != nil {
+	pw, err := readPassword("Enter backup password: ")
+	if err != nil {
+		return err
+	}
+
+	if err := bk.Restore(ctx, fs.Arg(0), fs.Arg(1), pw); err != nil {
 		return err
 	}
 

@@ -261,11 +261,18 @@ func refreshCmd(ctx context.Context) tea.Cmd {
 }
 
 // syncEntryCmd syncs one entry off the UI goroutine, working on a copy so the
-// result can be applied back in Update without a data race.
+// result can be applied back in Update without a data race. Encryption needs only
+// the public keyring (loaded from the config), so no password is ever required.
 func syncEntryCmd(ctx context.Context, e bk.Entry) tea.Cmd {
 	return func() tea.Msg {
 		ec := e
-		_, err := bk.Sync(ctx, &ec)
+
+		cfg, err := bk.Load()
+		if err != nil {
+			return syncResultMsg{entry: ec, err: err}
+		}
+
+		_, err = bk.Sync(ctx, &ec, cfg.Key)
 
 		return syncResultMsg{entry: ec, err: err}
 	}

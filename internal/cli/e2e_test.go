@@ -24,6 +24,7 @@ func TestMain(m *testing.M) {
 	// Safety net: keep all tests off the real ~/.config/bk; individual tests
 	// may still override BK_CONFIG via t.Setenv.
 	_ = os.Setenv("BK_CONFIG", filepath.Join(dir, "config.json"))
+	_ = os.Setenv("BK_PASSWORD", "test-password") // non-interactive add/restore
 
 	build := exec.Command("go", "build", "-o", bkBin, "github.com/hoffa/bk")
 

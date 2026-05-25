@@ -61,6 +61,7 @@ func useTempConfig(t *testing.T) string {
 
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("BK_CONFIG", path)
+	t.Setenv("BK_PASSWORD", "test-password") // non-interactive add/restore
 
 	return path
 }

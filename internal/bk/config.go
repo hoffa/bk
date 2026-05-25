@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/hoffa/bk/internal/crypt"
 	"github.com/hoffa/bk/internal/util"
 )
 
@@ -30,9 +31,11 @@ type Entry struct {
 	SyncedAt string
 }
 
-// Config is the whole on-disk config: the set of configured backups.
+// Config is the whole on-disk config: the set of configured backups plus the
+// encryption keyring (set on first add; backups are always encrypted to it).
 type Config struct {
 	Sync []Entry
+	Key  crypt.Keyring
 }
 
 // ErrTargetAbsent means a target path does not exist, e.g. an unplugged drive.
@@ -92,6 +95,24 @@ func (c *Config) Add(source, target string) error {
 	}
 
 	c.Sync = append(c.Sync, Entry{Source: source, Target: target})
+
+	return nil
+}
+
+// HasKey reports whether the encryption keyring has been set up.
+func (c *Config) HasKey() bool {
+	return c.Key.Recipient != ""
+}
+
+// SetPassword creates the encryption keyring from password. Backups are then
+// encrypted to it; the password is needed only to restore.
+func (c *Config) SetPassword(password string) error {
+	kr, err := crypt.NewKeyring(password)
+	if err != nil {
+		return err
+	}
+
+	c.Key = kr
 
 	return nil
 }

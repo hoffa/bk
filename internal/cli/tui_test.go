@@ -100,8 +100,18 @@ func TestModelSyncResultSynced(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	e := bk.Entry{Source: repo, Target: target}
-	if _, err := bk.Sync(t.Context(), &e); err != nil { // create a real synced backup
+	// add sets up the keyring; then create a real synced backup.
+	if err := addCmd([]string{repo, target}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e := cfg.Sync[0]
+	if _, err := bk.Sync(t.Context(), &e, cfg.Key); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,10 +228,21 @@ func TestRefreshCmd(t *testing.T) {
 }
 
 func TestSyncEntryCmd(t *testing.T) {
+	useTempConfig(t)
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	r, ok := syncEntryCmd(t.Context(), bk.Entry{Source: repo, Target: target})().(syncResultMsg)
+	// add sets up the keyring; syncEntryCmd loads it from the config.
+	if err := addCmd([]string{repo, target}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, ok := syncEntryCmd(t.Context(), cfg.Sync[0])().(syncResultMsg)
 	if !ok {
 		t.Fatal("syncEntryCmd did not return syncResultMsg")
 	}

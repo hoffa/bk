@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/hoffa/bk/internal/crypt"
 	"github.com/hoffa/bk/internal/git"
 	"github.com/hoffa/bk/internal/util"
 )
@@ -16,12 +18,16 @@ const (
 	backupSentinel = "BK_BACKUP.json"
 	latestFile     = "latest.json"
 	versionsDir    = "versions"
+	encExt         = ".age" // suffix on an encrypted bundle
 )
 
-// backupMeta is the content of BK_BACKUP.json: a stable opaque id, used as a
-// sentinel for auto-discovery of backups on mounted volumes.
+// backupMeta is the content of BK_BACKUP.json: a stable opaque id (a sentinel
+// for auto-discovery of backups on mounted volumes) and the keyring, so the
+// backup is self-describing -- a restore needs only the target and the password,
+// not the source machine's config.
 type backupMeta struct {
-	ID string
+	ID  string
+	Key crypt.Keyring
 }
 
 // latestMeta is the content of latest.json: a pointer to the current version
@@ -64,13 +70,13 @@ func writeLatest(backupDir string, l latestMeta) error {
 // point at the new bundle. The backup is initialized on first sync. If the
 // repo's refs are unchanged since the last sync, it does nothing.
 // It reports whether a new version was written (false means already up to date).
-func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
+func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyring) (bool, error) {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
 		return false, err
 	}
 
-	if err := initBackup(backupDir); err != nil {
+	if err := initBackup(backupDir, kr); err != nil {
 		return false, err
 	}
 
@@ -88,9 +94,10 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 	// backup are serialized and the nanosecond stamp makes a real collision
 	// practically impossible, so an existing name means something is wrong --
 	// error rather than clobber a previous version.
-	base := fmt.Sprintf("bk-%s.bundle", time.Now().UTC().Format("20060102T150405.000000000Z"))
+	base := fmt.Sprintf("bk-%s.bundle%s", time.Now().UTC().Format("20060102T150405.000000000Z"), encExt)
 	bundlePath := filepath.Join(backupDir, versionsDir, base)
-	tmpBundle := bundlePath + ".tmp"
+	tmpPlain := bundlePath + ".plain" // plaintext bundle, deleted before return
+	tmpEnc := bundlePath + ".tmp"     // encrypted, renamed into place
 
 	if _, err := os.Stat(bundlePath); err == nil {
 		return false, fmt.Errorf("version %s already exists; refusing to overwrite", base)
@@ -98,26 +105,36 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 		return false, err
 	}
 
-	// Write + verify the bundle under a temp name first so a partial or corrupt
-	// bundle never appears under its final name (or gets referenced below).
-	if err := git.SafeCreateBundle(ctx, repoPath, tmpBundle); err != nil {
-		_ = os.Remove(tmpBundle)
+	// Build + verify the plaintext bundle, encrypt it to the recipient, and keep
+	// only the encrypted copy. All under temp names so a partial/corrupt file
+	// never appears under the final name (or gets referenced below).
+	if err := git.SafeCreateBundle(ctx, repoPath, tmpPlain); err != nil {
+		_ = os.Remove(tmpPlain)
 		return false, err
 	}
 
-	sum, err := util.SHA256(tmpBundle)
+	if err := crypt.EncryptFile(tmpEnc, tmpPlain, kr.Recipient); err != nil {
+		_ = os.Remove(tmpPlain)
+		_ = os.Remove(tmpEnc)
+
+		return false, err
+	}
+
+	_ = os.Remove(tmpPlain)
+
+	sum, err := util.SHA256(tmpEnc)
 	if err != nil {
-		_ = os.Remove(tmpBundle)
+		_ = os.Remove(tmpEnc)
 		return false, err
 	}
 
-	if err := os.Rename(tmpBundle, bundlePath); err != nil {
-		_ = os.Remove(tmpBundle)
+	if err := os.Rename(tmpEnc, bundlePath); err != nil {
+		_ = os.Remove(tmpEnc)
 		return false, err
 	}
 
 	// Sidecar before latest.json; latest.json is updated last so it only ever
-	// points at a fully-written, verified bundle with a complete sidecar.
+	// points at a fully-written bundle with a complete sidecar.
 	if err := util.WriteSHA256Sum(bundlePath, sum); err != nil {
 		return false, err
 	}
@@ -135,8 +152,9 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 }
 
 // Restore writes the latest version of the backup at backupDir into dst, after
-// checking the sha256 sidecar. dst must not already exist.
-func Restore(ctx context.Context, backupDir, dst string) error {
+// checking the sha256 sidecar. dst must not already exist. The password decrypts
+// the bundle (ignored for legacy unencrypted backups).
+func Restore(ctx context.Context, backupDir, dst, password string) error {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
 		return err
@@ -149,7 +167,8 @@ func Restore(ctx context.Context, backupDir, dst string) error {
 		return fmt.Errorf("stat restore path: %w", err)
 	}
 
-	if _, err := loadBackupMeta(backupDir); err != nil {
+	meta, err := loadBackupMeta(backupDir)
+	if err != nil {
 		return fmt.Errorf("not a backup directory (%s): %w", backupDir, err)
 	}
 
@@ -179,7 +198,32 @@ func Restore(ctx context.Context, backupDir, dst string) error {
 		return fmt.Errorf("sha256 mismatch for %s:\n  want %s\n  got  %s", rel, want, got)
 	}
 
-	return git.Clone(ctx, bundlePath, dst)
+	// Legacy unencrypted backups clone straight from the stored bundle.
+	if !strings.HasSuffix(rel, encExt) {
+		return git.Clone(ctx, bundlePath, dst)
+	}
+
+	id, err := meta.Key.Identity(password)
+	if err != nil {
+		return err
+	}
+
+	// Decrypt to a temp plaintext bundle, then clone from it.
+	f, err := os.CreateTemp("", "bk-restore-*.bundle")
+	if err != nil {
+		return err
+	}
+
+	tmp := f.Name()
+	_ = f.Close()
+
+	defer func() { _ = os.Remove(tmp) }()
+
+	if err := crypt.DecryptFile(tmp, bundlePath, id); err != nil {
+		return err
+	}
+
+	return git.Clone(ctx, tmp, dst)
 }
 
 // backupDirUsable reports whether dir is safe to use as a backup target: it
@@ -208,7 +252,7 @@ func backupDirUsable(dir string) (bool, error) {
 // and, if BK_BACKUP.json is absent, writes one with a fresh id. An existing
 // sentinel is left untouched so the id is stable across syncs. It refuses to
 // write into a non-empty directory that isn't already a backup.
-func initBackup(dir string) error {
+func initBackup(dir string, kr crypt.Keyring) error {
 	if ok, err := backupDirUsable(dir); err != nil {
 		return err
 	} else if !ok {
@@ -231,7 +275,7 @@ func initBackup(dir string) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(backupMeta{ID: id}, "", "  ")
+	data, err := json.MarshalIndent(backupMeta{ID: id, Key: kr}, "", "  ")
 	if err != nil {
 		return err
 	}

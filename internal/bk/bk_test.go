@@ -80,7 +80,7 @@ func TestSyncEntry(t *testing.T) {
 
 	e := Entry{Source: repo, Target: target}
 
-	synced, err := Sync(ctx, &e)
+	synced, err := Sync(ctx, &e, testKey)
 	if err != nil || !synced {
 		t.Fatalf("first sync synced=%v err=%v", synced, err)
 	}
@@ -94,18 +94,18 @@ func TestSyncEntry(t *testing.T) {
 	}
 
 	// Unchanged repo -> no new version.
-	if synced, err := Sync(ctx, &e); err != nil || synced {
+	if synced, err := Sync(ctx, &e, testKey); err != nil || synced {
 		t.Fatalf("unchanged sync synced=%v err=%v", synced, err)
 	}
 
 	// New commit -> append a version.
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 
-	if synced, err := Sync(ctx, &e); err != nil || !synced {
+	if synced, err := Sync(ctx, &e, testKey); err != nil || !synced {
 		t.Fatalf("post-commit sync synced=%v err=%v", synced, err)
 	}
 
-	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle.age"))
 	if len(bundles) != 2 {
 		t.Fatalf("got %d bundles, want 2", len(bundles))
 	}
@@ -117,13 +117,13 @@ func TestSyncEntryAbsent(t *testing.T) {
 
 	// First sync with a missing parent (e.g. drive not mounted) -> absent.
 	e := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "nope", "backup")}
-	if _, err := Sync(ctx, &e); !errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e, testKey); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
 
 	// id set but target missing -> absent.
 	e2 := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "missing"), ID: "x"}
-	if _, err := Sync(ctx, &e2); !errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e2, testKey); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
 }
@@ -133,16 +133,16 @@ func TestSyncEntryIDMismatch(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	if err := initBackup(target); err != nil {
+	if err := initBackup(target, testKey); err != nil {
 		t.Fatal(err)
 	}
 
 	e := Entry{Source: repo, Target: target, ID: "not-the-real-id"}
-	if _, err := Sync(ctx, &e); err == nil || errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e, testKey); err == nil || errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want id-mismatch failure, got %v", err)
 	}
 
-	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle"))
+	bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle.age"))
 	if len(bundles) != 0 {
 		t.Fatalf("expected no bundles on mismatch, got %d", len(bundles))
 	}
@@ -154,7 +154,7 @@ func TestSyncEntryNotABackup(t *testing.T) {
 	target := t.TempDir() // exists but has no BK_BACKUP.json
 
 	e := Entry{Source: repo, Target: target, ID: "x"}
-	if _, err := Sync(ctx, &e); err == nil {
+	if _, err := Sync(ctx, &e, testKey); err == nil {
 		t.Fatal("expected failure for non-backup target")
 	}
 }
@@ -164,7 +164,7 @@ func TestSyncBackupRestoreRoundTrip(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestSyncBackupRestoreRoundTrip(t *testing.T) {
 		t.Fatal("BK_BACKUP.json has empty id")
 	}
 
-	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle"))
+	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle.age"))
 	if len(bundles) != 1 {
 		t.Fatalf("got %d bundles, want 1", len(bundles))
 	}
@@ -187,7 +187,7 @@ func TestSyncBackupRestoreRoundTrip(t *testing.T) {
 	}
 
 	restore := filepath.Join(t.TempDir(), "restored")
-	if err := Restore(ctx, backup, restore); err != nil {
+	if err := Restore(ctx, backup, restore, testPassword); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
 		t.Fatalf("sync 1: %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 
-	if _, err := syncBackup(ctx, repo, backup); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
 		t.Fatalf("sync 2: %v", err)
 	}
 
@@ -225,14 +225,14 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 		t.Fatalf("id changed across syncs: %s -> %s", first.ID, second.ID)
 	}
 
-	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle"))
+	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle.age"))
 	if len(bundles) != 2 {
 		t.Fatalf("got %d bundles, want 2", len(bundles))
 	}
 
 	// latest must restore the newest state (two commits).
 	restore := filepath.Join(t.TempDir(), "restored")
-	if err := Restore(ctx, backup, restore); err != nil {
+	if err := Restore(ctx, backup, restore, testPassword); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestSyncBackupRefusesNonEmptyTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := syncBackup(t.Context(), repo, target); err == nil {
+	if _, err := syncBackup(t.Context(), repo, target, testKey); err == nil {
 		t.Fatal("expected sync to refuse a non-empty non-backup target")
 	}
 }
@@ -259,7 +259,7 @@ func TestRestoreShaMismatch(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,7 +273,7 @@ func TestRestoreShaMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Restore(ctx, backup, filepath.Join(t.TempDir(), "restored"))
+	err = Restore(ctx, backup, filepath.Join(t.TempDir(), "restored"), testPassword)
 	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Fatalf("want sha256 mismatch error, got %v", err)
 	}
@@ -284,18 +284,18 @@ func TestRestoreExistingTarget(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
 		t.Fatal(err)
 	}
 
 	target := t.TempDir() // already exists
-	if err := Restore(ctx, backup, target); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if err := Restore(ctx, backup, target, testPassword); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want already-exists error, got %v", err)
 	}
 }
 
 func TestRestoreNotABackup(t *testing.T) {
-	err := Restore(t.Context(), t.TempDir(), filepath.Join(t.TempDir(), "restored"))
+	err := Restore(t.Context(), t.TempDir(), filepath.Join(t.TempDir(), "restored"), testPassword)
 	if err == nil || !strings.Contains(err.Error(), "not a backup directory") {
 		t.Fatalf("want not-a-backup error, got %v", err)
 	}
@@ -303,11 +303,11 @@ func TestRestoreNotABackup(t *testing.T) {
 
 func TestRestoreNoVersions(t *testing.T) {
 	backup := filepath.Join(t.TempDir(), "backup")
-	if err := initBackup(backup); err != nil {
+	if err := initBackup(backup, testKey); err != nil {
 		t.Fatal(err)
 	}
 
-	err := Restore(t.Context(), backup, filepath.Join(t.TempDir(), "restored"))
+	err := Restore(t.Context(), backup, filepath.Join(t.TempDir(), "restored"), testPassword)
 	if err == nil || !strings.Contains(err.Error(), "latest.json") {
 		t.Fatalf("want missing latest.json error, got %v", err)
 	}
@@ -319,7 +319,7 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := initBackup(dir); err == nil {
+	if err := initBackup(dir, testKey); err == nil {
 		t.Fatal("expected refusal to initialize a non-empty non-backup dir")
 	}
 
@@ -334,11 +334,11 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 
 func TestInitBackupEmptyAndAdopt(t *testing.T) {
 	dir := t.TempDir()
-	if err := initBackup(dir); err != nil {
+	if err := initBackup(dir, testKey); err != nil {
 		t.Fatalf("empty dir should initialize: %v", err)
 	}
 
-	if err := initBackup(dir); err != nil {
+	if err := initBackup(dir, testKey); err != nil {
 		t.Fatalf("re-init should adopt: %v", err)
 	}
 }
@@ -384,7 +384,7 @@ func TestEvalStates(t *testing.T) {
 
 	// Synced after a sync, stale after a new commit.
 	e := Entry{Source: repo, Target: target}
-	if _, err := Sync(ctx, &e); err != nil {
+	if _, err := Sync(ctx, &e, testKey); err != nil {
 		t.Fatal(err)
 	}
 
@@ -410,7 +410,7 @@ func TestEvalErrors(t *testing.T) {
 
 	// id set, valid backup, but a different id.
 	mismatch := filepath.Join(t.TempDir(), "b")
-	if err := initBackup(mismatch); err != nil {
+	if err := initBackup(mismatch, testKey); err != nil {
 		t.Fatal(err)
 	}
 

@@ -5,7 +5,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/hoffa/bk/internal/crypt"
 )
+
+const testPassword = "test-password"
+
+// testKey is the keyring used across bk tests (generated once).
+var testKey, _ = crypt.NewKeyring(testPassword)
 
 // mustRun executes a command in dir and fails the test on error.
 func mustRun(t *testing.T, dir, name string, args ...string) {
