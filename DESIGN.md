@@ -25,15 +25,18 @@ the dot. So a bright green dot is "synced and plugged in", a dim green dot is
 
 ### Plain output (`bk status`, piped, or CI)
 
-A colorless text table carries more nuance than the dot: short ASCII codes, with
-a trailing `?` meaning *unverified* (target absent, verdict inferred from the
-cached refs):
+Headerless, tab-separated, one record per line — every column machine-readable so
+`cut`/`awk`/`read` consume it without skipping. Columns, in order: id, source,
+target, state, last sync (RFC 3339, empty if never). The state carries more
+nuance than the dot:
+an `_ONLINE` / `_OFFLINE` suffix records whether the verdict was confirmed
+against a present target or inferred from the cache while it was absent.
 
-| Code     | Meaning                                                       |
-| -------- | ------------------------------------------------------------ |
-| `OK`     | synced, verified against the target                          |
-| `OK?`    | believed synced, but offline so unverified                   |
-| `STALE`  | confirmed out of date — target present, repo has new commits |
-| `STALE?` | believed out of date (from the last sync), but offline       |
-| `NEW`    | never synced                                                  |
-| `ERROR`  | error                                                         |
+| Code             | Meaning                                                       |
+| ---------------- | ------------------------------------------------------------ |
+| `SYNCED_ONLINE`  | synced, verified against the target                          |
+| `SYNCED_OFFLINE` | believed synced, but offline so unverified                   |
+| `STALE_ONLINE`   | confirmed out of date — target present, repo has new commits |
+| `STALE_OFFLINE`  | believed out of date (from the last sync), but offline       |
+| `NEW`            | never synced                                                  |
+| `ERROR`          | error                                                         |

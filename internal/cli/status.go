@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
-	"text/tabwriter"
+	"time"
 
 	"github.com/hoffa/bk/internal/bk"
 )
@@ -27,37 +26,19 @@ func evalAll(ctx context.Context) ([]bk.Status, error) {
 	return out, nil
 }
 
-// short returns the first n characters of s.
-func short(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-
-	return s
-}
-
-// printStatus renders entry statuses as an aligned table.
+// printStatus writes entry statuses as headerless TSV (the TUI is the pretty
+// view; this is the scriptable one). No header means every line is a record, so
+// cut/awk/read consume it without skipping. Columns are, in order: id, source,
+// target, state, last sync (RFC 3339, or empty if never).
 func printStatus(w io.Writer, statuses []bk.Status) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	// Buffered writes; any error surfaces on Flush.
-	_, _ = fmt.Fprintln(tw, "ID\tSOURCE\tTARGET\tSTATE\tVERSIONS\tLAST SYNC")
-
 	for _, s := range statuses {
-		id, versions, last := "-", "-", "-"
-		if s.ID != "" {
-			id = short(s.ID, 12)
-		}
-
-		if s.Versions > 0 {
-			versions = strconv.Itoa(s.Versions)
-		}
-
+		var last string
 		if !s.LastSync.IsZero() {
-			last = s.LastSync.Format("2006-01-02 15:04:05Z")
+			last = s.LastSync.Format(time.RFC3339)
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, statusCode(s.State, s.Present), versions, last)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Source, s.Target, statusCode(s.State, s.Present), last)
 	}
 
-	return tw.Flush()
+	return nil
 }

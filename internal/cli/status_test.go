@@ -33,31 +33,25 @@ func TestPrintStatus(t *testing.T) {
 
 	statuses := []bk.Status{
 		{Entry: bk.Entry{Source: "/a", Target: "/b", ID: "0123456789abcdef0123"}, State: bk.StateSynced, Present: true, Versions: 3},
-		{Entry: bk.Entry{Source: "/c", Target: "/d"}, State: bk.StateUnsynced},
+		{Entry: bk.Entry{Source: "/c", Target: "/d", ID: "feed"}, State: bk.StateUnsynced},
 	}
 	if err := printStatus(&buf, statuses); err != nil {
 		t.Fatal(err)
 	}
 
 	out := buf.String()
-	for _, want := range []string{"SOURCE", "TARGET", "0123456789ab", "OK", "NEW", "/a", "/d"} {
+	// Headerless TSV: full id, tab-separated fields.
+	for _, want := range []string{"0123456789abcdef0123", "SYNCED_ONLINE", "NEW", "/a", "/d"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
 
-	// Short id is truncated to 12 chars (full id would be 20 here).
-	if strings.Contains(out, "0123456789abcdef0123") {
-		t.Errorf("expected truncated id, got full:\n%s", out)
-	}
-}
-
-func TestShort(t *testing.T) {
-	if got := short("abcdefgh", 3); got != "abc" {
-		t.Errorf("short = %q, want abc", got)
+	if strings.Contains(out, "SOURCE") {
+		t.Errorf("expected no header row:\n%s", out)
 	}
 
-	if got := short("ab", 5); got != "ab" {
-		t.Errorf("short = %q, want ab", got)
+	if !strings.Contains(out, "/a\t/b\t") {
+		t.Errorf("expected tab-separated fields:\n%s", out)
 	}
 }

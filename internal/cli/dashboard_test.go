@@ -18,10 +18,10 @@ func TestStatusCode(t *testing.T) {
 		present bool
 		want    string
 	}{
-		{bk.StateSynced, true, "OK"},
-		{bk.StateSynced, false, "OK?"},
-		{bk.StateStale, true, "STALE"},
-		{bk.StateStale, false, "STALE?"}, // "?" = unverified (offline)
+		{bk.StateSynced, true, "SYNCED_ONLINE"},
+		{bk.StateSynced, false, "SYNCED_OFFLINE"},
+		{bk.StateStale, true, "STALE_ONLINE"},
+		{bk.StateStale, false, "STALE_OFFLINE"},
 		{bk.StateUnsynced, true, "NEW"},
 		{bk.StateError, true, "ERROR"},
 	}

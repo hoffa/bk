@@ -33,26 +33,26 @@ func dashboard(ctx context.Context, w io.Writer) error {
 	return printStatus(w, statuses)
 }
 
-// statusCode is the short ASCII code for a state + presence. A trailing "?"
-// means unverified: the target is absent, so the verdict is inferred from the
-// last sync recorded in the config rather than confirmed against the target.
+// statusCode is the machine-readable code for a state + presence. The _ONLINE /
+// _OFFLINE suffix records whether the verdict was confirmed against a present
+// target or inferred from the config's cache while the target was absent.
 func statusCode(s bk.State, present bool) string {
-	q := ""
-	if !present {
-		q = "?"
+	suffix := "_OFFLINE"
+	if present {
+		suffix = "_ONLINE"
 	}
 
 	switch s {
 	case bk.StateSynced:
-		return "OK" + q
+		return "SYNCED" + suffix
 	case bk.StateStale:
-		return "STALE" + q
+		return "STALE" + suffix
 	case bk.StateUnsynced:
 		return "NEW"
 	case bk.StateError:
 		return "ERROR"
 	default:
-		return "--"
+		return "UNKNOWN"
 	}
 }
 
