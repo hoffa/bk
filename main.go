@@ -1,11 +1,17 @@
+// Command bk makes versioned, verifiable backups of git repositories using git
+// bundles. It registers repo -> backup-dir pairs in a global config, syncs them
+// (skipping unchanged repos), and shows their currency in a live dashboard.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 )
 
 // errUsage signals a usage error: the message has already been printed and the
@@ -13,17 +19,10 @@ import (
 var errUsage = errors.New("usage")
 
 func usage() {
-	fmt.Fprint(os.Stderr, `usage: bk <command> <args>
-
-commands:
-  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config
-  sync                                  sync all configured backups
-  status                                show the state of every configured backup
-  restore <backup-dir> <restore-path>   restore a backup's latest version
-`)
+	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  restore <backup-dir> <restore-path>   restore a backup's latest")
 }
 
-func statusCmd(args []string) error {
+func statusCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
@@ -32,18 +31,20 @@ func statusCmd(args []string) error {
 		return errUsage
 	}
 
-	statuses, err := statusAll()
+	statuses, err := statusAll(ctx)
 	if err != nil {
 		return err
 	}
+
 	if len(statuses) == 0 {
 		fmt.Println("no backups configured; add one with: bk add <repo> <backup-dir>")
 		return nil
 	}
+
 	return printStatus(os.Stdout, statuses)
 }
 
-func syncCmd(args []string) error {
+func syncCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
@@ -51,7 +52,8 @@ func syncCmd(args []string) error {
 		fmt.Fprintln(os.Stderr, "usage: bk sync")
 		return errUsage
 	}
-	return syncAll()
+
+	return syncAll(ctx)
 }
 
 func addCmd(args []string) error {
@@ -67,6 +69,7 @@ func addCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	target, err := filepath.Abs(fs.Arg(1))
 	if err != nil {
 		return err
@@ -76,6 +79,7 @@ func addCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	for _, e := range cfg.Sync {
 		if e.Source == source && e.Target == target {
 			return fmt.Errorf("already configured: %s -> %s", source, target)
@@ -90,10 +94,11 @@ func addCmd(args []string) error {
 	}
 
 	fmt.Printf("added %s -> %s (run 'bk sync' to back up)\n", source, target)
+
 	return nil
 }
 
-func restoreCmd(args []string) error {
+func restoreCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
@@ -101,26 +106,27 @@ func restoreCmd(args []string) error {
 		fmt.Fprintln(os.Stderr, "usage: bk restore <backup-dir> <restore-path>")
 		return errUsage
 	}
-	return restoreBackup(fs.Arg(0), fs.Arg(1))
+
+	return restoreBackup(ctx, fs.Arg(0), fs.Arg(1))
 }
 
 // run dispatches a command and returns an error; errUsage means usage was
 // already printed.
-func run(args []string) error {
+func run(ctx context.Context, args []string) error {
 	if len(args) < 1 {
-		return dashboard(os.Stdout)
+		return dashboard(ctx, os.Stdout)
 	}
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "sync":
-		return syncCmd(rest)
+		return syncCmd(ctx, rest)
 	case "add":
 		return addCmd(rest)
 	case "status":
-		return statusCmd(rest)
+		return statusCmd(ctx, rest)
 	case "restore":
-		return restoreCmd(rest)
+		return restoreCmd(ctx, rest)
 	default:
 		usage()
 		return errUsage
@@ -128,13 +134,23 @@ func run(args []string) error {
 }
 
 func main() {
-	err := run(os.Args[1:])
-	switch {
+	os.Exit(bkMain(os.Args[1:]))
+}
+
+// bkMain runs a command and returns the process exit code. It is split from main
+// so deferred cleanup (signal handling) runs before os.Exit.
+func bkMain(args []string) int {
+	// Cancel in-flight git operations on the first Ctrl-C / SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	switch err := run(ctx, args); {
 	case err == nil:
+		return 0
 	case errors.Is(err, errUsage):
-		os.Exit(2)
+		return 2
 	default:
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return 1
 	}
 }

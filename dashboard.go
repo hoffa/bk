@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,19 +10,21 @@ import (
 // dashboard is the `bk` (no args) entry point. On a terminal it runs the live
 // watch TUI; otherwise (piped/CI) it prints a one-shot status snapshot.
 // Neither syncs by default -- use `bk sync`, or toggle auto-sync in the TUI.
-func dashboard(w io.Writer) error {
+func dashboard(ctx context.Context, w io.Writer) error {
 	if isTerminal(w) {
-		return runTUI()
+		return runTUI(ctx)
 	}
 
-	statuses, err := statusAll()
+	statuses, err := statusAll(ctx)
 	if err != nil {
 		return err
 	}
+
 	if len(statuses) == 0 {
 		_, _ = fmt.Fprintln(w, "no backups configured; add one with: bk add <repo> <backup-dir>")
 		return nil
 	}
+
 	return printStatus(w, statuses)
 }
 
@@ -33,6 +36,7 @@ func statusCode(s entryState, present bool) string {
 	if !present {
 		q = "?"
 	}
+
 	switch s {
 	case stateSynced:
 		return "OK" + q
@@ -65,6 +69,7 @@ func badgeText(color bool, ansiColor, text string) string {
 	if !color {
 		return cell
 	}
+
 	return "\033[" + ansiColor + ";7m" + cell + "\033[0m"
 }
 
@@ -89,6 +94,8 @@ func isTerminal(w io.Writer) bool {
 	if !ok {
 		return false
 	}
+
 	fi, err := f.Stat()
+
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

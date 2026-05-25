@@ -1,0 +1,39 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    - containedctx # TUI model holds ctx: tea.Cmd has no ctx parameter
+    - cyclop
+    - depguard
+    - err113
+    - exhaustive
+    - exhaustruct
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - goconst
+    - gocyclo
+    - gomodguard
+    - gosec
+    - ireturn
+    - lll
+    - mnd
+    - musttag # on-disk JSON uses default Go field names, no tags by design
+    - nestif
+    - nlreturn
+    - noinlineerr
+    - paralleltest
+    - recvcheck
+    - unparam
+    - varnamelen
+    - wrapcheck
+    - wsl
+  exclusions:
+    rules:
+      # Cancellation has no value in short-lived test setup (git fixtures, build).
+      - path: _test\.go
+        linters:
+          - noctx

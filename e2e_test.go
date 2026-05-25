@@ -18,6 +18,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+
 	bkBin = filepath.Join(dir, "bk")
 
 	// Safety net: keep all tests off the real ~/.config/bk; individual tests
@@ -25,30 +26,38 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("BK_CONFIG", filepath.Join(dir, "config.json"))
 
 	build := exec.Command("go", "build", "-o", bkBin, ".")
+
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e build failed:", err)
+
 		_ = os.RemoveAll(dir)
+
 		os.Exit(1)
 	}
 
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+
 	os.Exit(code)
 }
 
 // runBin runs the built binary and returns its combined output and exit code.
 func runBin(t *testing.T, args ...string) (string, int) {
 	t.Helper()
+
 	out, err := exec.Command(bkBin, args...).CombinedOutput()
 	if err == nil {
 		return string(out), 0
 	}
+
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
 		return string(out), ee.ExitCode()
 	}
+
 	t.Fatalf("run %v: %v", args, err)
+
 	return "", 0
 }
 
@@ -76,6 +85,7 @@ func TestE2E(t *testing.T) {
 		if out, code := runBin(t, "restore", backup, restore); code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)
 		}
+
 		if log := output(t, restore, "git", "log", "--oneline"); !strings.Contains(log, "first") {
 			t.Fatalf("restored repo missing commit:\n%s", log)
 		}
@@ -86,6 +96,7 @@ func TestE2E(t *testing.T) {
 		if code != 1 {
 			t.Fatalf("exit %d, want 1\n%s", code, out)
 		}
+
 		if !strings.Contains(out, "already exists") {
 			t.Fatalf("missing error message:\n%s", out)
 		}
@@ -96,6 +107,7 @@ func TestE2E(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)
 		}
+
 		if !strings.Contains(out, backup) {
 			t.Fatalf("dashboard missing target:\n%s", out)
 		}

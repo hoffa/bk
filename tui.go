@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ func entryKey(e syncEntry) string {
 // syncs out-of-date entries via syncConfigured. All work happens off the UI
 // goroutine via commands.
 type tuiModel struct {
+	// ctx is cancelled when the user quits, so in-flight git commands launched
+	// as commands stop instead of running on after the UI is gone.
+	ctx           context.Context
+	cancel        context.CancelFunc
 	statuses      []backupStatus
 	syncing       map[string]bool
 	autoSync      bool
@@ -39,15 +44,20 @@ type (
 	}
 )
 
-// runTUI runs the live status dashboard until the user quits.
-func runTUI() error {
-	m := tuiModel{syncing: map[string]bool{}}
+// runTUI runs the live status dashboard until the user quits. The context is
+// cancelled on quit so background syncs don't outlive the UI.
+func runTUI(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	m := tuiModel{ctx: ctx, cancel: cancel, syncing: map[string]bool{}}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+
 	return err
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(), tickCmd())
+	return tea.Batch(refreshCmd(m.ctx), tickCmd())
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -56,12 +66,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			m.quitting = true
+			m.cancel() // stop any in-flight syncs
+
 			return m, tea.Quit
 		case "a":
 			m.autoSync = !m.autoSync
 			if m.autoSync {
 				return m, m.startSyncs()
 			}
+
 			return m, nil
 		}
 
@@ -72,18 +85,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		// Reload config + re-check (picks up entries added elsewhere, plugged-in
 		// drives, and new commits).
-		return m, tea.Batch(refreshCmd(), tickCmd())
+		return m, tea.Batch(refreshCmd(m.ctx), tickCmd())
 
 	case refreshMsg:
 		m.statuses = []backupStatus(msg)
 		if m.autoSync {
 			return m, m.startSyncs()
 		}
+
 		return m, nil
 
 	case syncResultMsg:
 		k := entryKey(msg.entry)
 		delete(m.syncing, k)
+
 		if msg.err == nil {
 			persistEntry(msg.entry) // record first-sync id + refs hash to the config
 		}
@@ -91,28 +106,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// than forcing an error color on a transient failure.
 		for i := range m.statuses {
 			if entryKey(m.statuses[i].syncEntry) == k {
-				m.statuses[i] = evalStatus(msg.entry)
+				m.statuses[i] = evalStatus(m.ctx, msg.entry)
 				break
 			}
 		}
+
 		return m, nil
 	}
 
 	return m, nil
-}
-
-// startSyncs kicks off syncs for every out-of-date entry not already syncing.
-func (m tuiModel) startSyncs() tea.Cmd {
-	var cmds []tea.Cmd
-	for _, s := range m.statuses {
-		k := entryKey(s.syncEntry)
-		// Only sync targets that are actually connected.
-		if s.present && s.state.needsSync() && !m.syncing[k] {
-			m.syncing[k] = true
-			cmds = append(cmds, syncEntryCmd(s.syncEntry))
-		}
-	}
-	return tea.Batch(cmds...)
 }
 
 func (m tuiModel) View() string {
@@ -121,9 +123,12 @@ func (m tuiModel) View() string {
 	}
 
 	var b strings.Builder
+
 	lines := 0
+
 	if len(m.statuses) == 0 {
 		b.WriteString("no backups configured; add one with: bk add <repo> <backup-dir>\n")
+
 		lines++
 	} else {
 		// Manual column widths from visible text: colored badges contain ANSI
@@ -134,18 +139,38 @@ func (m tuiModel) View() string {
 			srcW = max(srcW, len(s.Source))
 			tgtW = max(tgtW, len(s.Target))
 		}
+
 		for _, s := range m.statuses {
 			bg := badge(true, s.state, s.present)
 			if m.syncing[entryKey(s.syncEntry)] {
 				bg = badgeText(true, "36", "SYNC") // cyan
 			}
+
 			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
 			lines++
 		}
 	}
 
 	b.WriteString(m.statusBar(lines))
+
 	return b.String()
+}
+
+// startSyncs kicks off syncs for every out-of-date entry not already syncing.
+func (m tuiModel) startSyncs() tea.Cmd {
+	var cmds []tea.Cmd
+
+	for _, s := range m.statuses {
+		k := entryKey(s.syncEntry)
+		// Only sync targets that are actually connected.
+		if s.present && s.state.needsSync() && !m.syncing[k] {
+			m.syncing[k] = true
+
+			cmds = append(cmds, syncEntryCmd(m.ctx, s.syncEntry))
+		}
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // statusBar renders the bottom row: auto-sync state flush-left, help
@@ -155,17 +180,17 @@ func (m tuiModel) statusBar(bodyLines int) string {
 	if m.autoSync {
 		mode = "on"
 	}
+
 	left := "auto-sync: " + mode
 	right := "a: toggle auto-sync  q: quit"
 
-	gap := m.width - len(left) - len(right)
-	if gap < 2 {
-		gap = 2
-	}
+	gap := max(m.width-len(left)-len(right), 2)
+
 	bar := left + strings.Repeat(" ", gap) + right
 
 	// Push the bar to the bottom of the screen when the height is known.
 	blanks := max(1, m.height-bodyLines-1)
+
 	return strings.Repeat("\n", blanks) + bar
 }
 
@@ -174,6 +199,7 @@ func relTime(t time.Time) string {
 	if t.IsZero() {
 		return "never"
 	}
+
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
@@ -188,22 +214,24 @@ func relTime(t time.Time) string {
 }
 
 // refreshCmd reloads the config and evaluates every entry off the UI goroutine.
-func refreshCmd() tea.Cmd {
+func refreshCmd(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		statuses, err := statusAll()
+		statuses, err := statusAll(ctx)
 		if err != nil {
 			return refreshMsg(nil)
 		}
+
 		return refreshMsg(statuses)
 	}
 }
 
 // syncEntryCmd syncs one entry off the UI goroutine, working on a copy so the
 // result can be applied back in Update without a data race.
-func syncEntryCmd(e syncEntry) tea.Cmd {
+func syncEntryCmd(ctx context.Context, e syncEntry) tea.Cmd {
 	return func() tea.Msg {
 		ec := e
-		_, err := syncConfigured(&ec)
+		_, err := syncConfigured(ctx, &ec)
+
 		return syncResultMsg{entry: ec, err: err}
 	}
 }
@@ -220,21 +248,26 @@ func persistEntry(e syncEntry) {
 	if err != nil {
 		return
 	}
+
 	changed := false
+
 	for i := range cfg.Sync {
 		c := &cfg.Sync[i]
 		if c.Source != e.Source || c.Target != e.Target {
 			continue
 		}
+
 		if c.ID == "" && e.ID != "" {
 			c.ID = e.ID
 			changed = true
 		}
+
 		if e.RefsHash != "" && c.RefsHash != e.RefsHash {
 			c.RefsHash = e.RefsHash
 			changed = true
 		}
 	}
+
 	if changed {
 		_ = saveConfig(cfg)
 	}

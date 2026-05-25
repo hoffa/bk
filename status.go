@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,6 +9,8 @@ import (
 	"strconv"
 	"text/tabwriter"
 	"time"
+
+	"github.com/hoffa/bk/internal/git"
 )
 
 // entryState is a configured backup's currency. It is the shared core model
@@ -46,6 +49,7 @@ func (s entryState) needsSync() bool {
 // backupStatus is an entry's currency plus presence and display details.
 type backupStatus struct {
 	syncEntry
+
 	state    entryState
 	present  bool      // target currently reachable
 	versions int       // only when present and a valid backup
@@ -53,22 +57,24 @@ type backupStatus struct {
 }
 
 // statusAll returns the state of every configured entry.
-func statusAll() ([]backupStatus, error) {
+func statusAll(ctx context.Context) ([]backupStatus, error) {
 	cfg, _, err := loadConfig()
 	if err != nil {
 		return nil, err
 	}
+
 	out := make([]backupStatus, 0, len(cfg.Sync))
 	for _, e := range cfg.Sync {
-		out = append(out, evalStatus(e))
+		out = append(out, evalStatus(ctx, e))
 	}
+
 	return out, nil
 }
 
 // evalStatus computes one entry's currency and presence without modifying
 // anything. When the target is present its latest.json is authoritative; when
 // absent, currency is inferred from the cached refs hash (best effort).
-func evalStatus(e syncEntry) backupStatus {
+func evalStatus(ctx context.Context, e syncEntry) backupStatus {
 	s := backupStatus{syncEntry: e}
 
 	target, err := filepath.Abs(e.Target)
@@ -76,6 +82,7 @@ func evalStatus(e syncEntry) backupStatus {
 		s.state = stateError
 		return s
 	}
+
 	s.present = statExists(target)
 
 	if e.ID == "" {
@@ -88,18 +95,22 @@ func evalStatus(e syncEntry) backupStatus {
 				return s
 			}
 		}
+
 		s.state = stateUnsynced
+
 		return s
 	}
 
 	if !s.present {
 		// Offline: judge currency from the cached last-synced refs.
 		s.state = stateStale
+
 		if e.RefsHash != "" {
-			if rh, err := repoRefsHash(e.Source); err == nil && rh == e.RefsHash {
+			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.RefsHash {
 				s.state = stateSynced
 			}
 		}
+
 		return s
 	}
 
@@ -109,30 +120,35 @@ func evalStatus(e syncEntry) backupStatus {
 		s.state = stateError
 		return s
 	}
+
 	if meta.ID != e.ID {
 		s.state = stateError
 		return s
 	}
+
 	latest, err := readLatest(target)
 	if err != nil {
 		s.state = stateStale
 		return s
 	}
+
 	s.lastSync = latest.SyncedAt
 	if bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle")); bundles != nil {
 		s.versions = len(bundles)
 	}
-	if rh, err := repoRefsHash(e.Source); err == nil && rh == latest.RefsHash {
+
+	if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == latest.RefsHash {
 		s.state = stateSynced
 	} else {
 		s.state = stateStale
 	}
+
 	return s
 }
 
 // evalEntry returns just an entry's currency state.
-func evalEntry(e syncEntry) entryState {
-	return evalStatus(e).state
+func evalEntry(ctx context.Context, e syncEntry) entryState {
+	return evalStatus(ctx, e).state
 }
 
 func statExists(path string) bool {
@@ -145,6 +161,7 @@ func short(s string, n int) string {
 	if len(s) > n {
 		return s[:n]
 	}
+
 	return s
 }
 
@@ -153,18 +170,23 @@ func printStatus(w io.Writer, statuses []backupStatus) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	// Buffered writes; any error surfaces on Flush.
 	_, _ = fmt.Fprintln(tw, "ID\tSOURCE\tTARGET\tSTATE\tVERSIONS\tLAST SYNC")
+
 	for _, s := range statuses {
 		id, versions, last := "-", "-", "-"
 		if s.ID != "" {
 			id = short(s.ID, 12)
 		}
+
 		if s.versions > 0 {
 			versions = strconv.Itoa(s.versions)
 		}
+
 		if !s.lastSync.IsZero() {
 			last = s.lastSync.Format("2006-01-02 15:04:05Z")
 		}
+
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, statusCode(s.state, s.present), versions, last)
 	}
+
 	return tw.Flush()
 }

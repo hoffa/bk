@@ -12,7 +12,9 @@ import (
 // mustRun executes a command in dir and fails the test on error.
 func mustRun(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
+
 	cmd := exec.Command(name, args...)
+
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
@@ -22,12 +24,15 @@ func mustRun(t *testing.T, dir, name string, args ...string) {
 // output executes a command in dir and returns its combined output.
 func output(t *testing.T, dir, name string, args ...string) string {
 	t.Helper()
+
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
+
 	return string(out)
 }
 
@@ -38,11 +43,14 @@ func initRepo(t *testing.T) string {
 	mustRun(t, dir, "git", "init", "-q")
 	mustRun(t, dir, "git", "config", "user.email", "t@example.com")
 	mustRun(t, dir, "git", "config", "user.name", "tester")
+
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	mustRun(t, dir, "git", "add", ".")
 	mustRun(t, dir, "git", "commit", "-qm", "first")
+
 	return dir
 }
 
@@ -50,7 +58,7 @@ func TestSyncRestoreRoundTrip(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(t.Context(), repo, backup); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -58,6 +66,7 @@ func TestSyncRestoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load meta: %v", err)
 	}
+
 	if meta.ID == "" {
 		t.Fatal("BK_BACKUP.json has empty id")
 	}
@@ -66,14 +75,16 @@ func TestSyncRestoreRoundTrip(t *testing.T) {
 	if len(bundles) != 1 {
 		t.Fatalf("got %d bundles, want 1", len(bundles))
 	}
+
 	if _, err := os.Stat(bundles[0] + ".sha256"); err != nil {
 		t.Fatalf("missing sidecar: %v", err)
 	}
 
 	restore := filepath.Join(t.TempDir(), "restored")
-	if err := restoreBackup(backup, restore); err != nil {
+	if err := restoreBackup(t.Context(), backup, restore); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
+
 	if log := output(t, restore, "git", "log", "--oneline"); !strings.Contains(log, "first") {
 		t.Fatalf("restored repo missing commit, log:\n%s", log)
 	}
@@ -83,16 +94,18 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(t.Context(), repo, backup); err != nil {
 		t.Fatalf("sync 1: %v", err)
 	}
+
 	first, err := loadBackupMeta(backup)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
-	if _, err := syncBackup(repo, backup); err != nil {
+
+	if _, err := syncBackup(t.Context(), repo, backup); err != nil {
 		t.Fatalf("sync 2: %v", err)
 	}
 
@@ -100,6 +113,7 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if first.ID != second.ID {
 		t.Fatalf("id changed across syncs: %s -> %s", first.ID, second.ID)
 	}
@@ -111,9 +125,10 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 
 	// latest must restore the newest state (two commits).
 	restore := filepath.Join(t.TempDir(), "restored")
-	if err := restoreBackup(backup, restore); err != nil {
+	if err := restoreBackup(t.Context(), backup, restore); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
+
 	if log := output(t, restore, "git", "log", "--oneline"); !strings.Contains(log, "second") {
 		t.Fatalf("latest restore missing newest commit, log:\n%s", log)
 	}
@@ -121,8 +136,9 @@ func TestSyncAppendsVersionsStableID(t *testing.T) {
 
 func TestRestoreShaMismatch(t *testing.T) {
 	repo := initRepo(t)
+
 	backup := filepath.Join(t.TempDir(), "backup")
-	if _, err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(t.Context(), repo, backup); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,12 +146,13 @@ func TestRestoreShaMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	bundle := filepath.Join(backup, latest.Path)
 	if err := os.WriteFile(bundle, []byte("corrupt"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	err = restoreBackup(backup, filepath.Join(t.TempDir(), "restored"))
+	err = restoreBackup(t.Context(), backup, filepath.Join(t.TempDir(), "restored"))
 	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
 		t.Fatalf("want sha256 mismatch error, got %v", err)
 	}
@@ -143,13 +160,15 @@ func TestRestoreShaMismatch(t *testing.T) {
 
 func TestRestoreExistingTarget(t *testing.T) {
 	repo := initRepo(t)
+
 	backup := filepath.Join(t.TempDir(), "backup")
-	if _, err := syncBackup(repo, backup); err != nil {
+	if _, err := syncBackup(t.Context(), repo, backup); err != nil {
 		t.Fatal(err)
 	}
 
 	target := t.TempDir() // already exists
-	err := restoreBackup(backup, target)
+
+	err := restoreBackup(t.Context(), backup, target)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("want already-exists error, got %v", err)
 	}
@@ -160,6 +179,7 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "important.txt"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := initBackup(dir); err == nil {
 		t.Fatal("expected refusal to initialize a non-empty non-backup dir")
 	}
@@ -167,6 +187,7 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, backupSentinel)); !os.IsNotExist(err) {
 		t.Error("sentinel should not have been written")
 	}
+
 	if _, err := os.Stat(filepath.Join(dir, versionsDir)); !os.IsNotExist(err) {
 		t.Error("versions dir should not have been created")
 	}
@@ -186,17 +207,19 @@ func TestInitBackupEmptyAndAdopt(t *testing.T) {
 
 func TestSyncRefusesNonEmptyTarget(t *testing.T) {
 	repo := initRepo(t)
+
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "data"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := syncBackup(repo, target); err == nil {
+
+	if _, err := syncBackup(t.Context(), repo, target); err == nil {
 		t.Fatal("expected sync to refuse a non-empty non-backup target")
 	}
 }
 
 func TestRestoreNotABackup(t *testing.T) {
-	err := restoreBackup(t.TempDir(), filepath.Join(t.TempDir(), "restored"))
+	err := restoreBackup(t.Context(), t.TempDir(), filepath.Join(t.TempDir(), "restored"))
 	if err == nil || !strings.Contains(err.Error(), "not a backup directory") {
 		t.Fatalf("want not-a-backup error, got %v", err)
 	}
@@ -208,26 +231,9 @@ func TestRestoreNoVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No latest.json written yet.
-	err := restoreBackup(backup, filepath.Join(t.TempDir(), "restored"))
+	err := restoreBackup(t.Context(), backup, filepath.Join(t.TempDir(), "restored"))
 	if err == nil || !strings.Contains(err.Error(), "latest.json") {
 		t.Fatalf("want missing latest.json error, got %v", err)
-	}
-}
-
-func TestVerifyBundleInvalid(t *testing.T) {
-	bad := filepath.Join(t.TempDir(), "not.bundle")
-	if err := os.WriteFile(bad, []byte("nope"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := verifyBundle(bad); err == nil {
-		t.Fatal("expected verify to fail on non-bundle file")
-	}
-}
-
-func TestCreateBundleInvalidRepo(t *testing.T) {
-	out := filepath.Join(t.TempDir(), "x.bundle")
-	if err := createBundle(t.TempDir(), out); err == nil {
-		t.Fatal("expected createBundle to fail outside a repo")
 	}
 }
 
@@ -238,10 +244,12 @@ func TestSha256File(t *testing.T) {
 	}
 	// echo -n abc | sha256sum
 	const want = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
 	got, err := sha256File(p)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got != want {
 		t.Fatalf("sha256 = %s, want %s", got, want)
 	}
@@ -256,10 +264,12 @@ func TestReadSidecarSum(t *testing.T) {
 	if err := os.WriteFile(p, []byte("deadbeef  x.bundle\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	got, err := readSidecarSum(p)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got != "deadbeef" {
 		t.Fatalf("got %q, want deadbeef", got)
 	}
@@ -268,6 +278,7 @@ func TestReadSidecarSum(t *testing.T) {
 	if err := os.WriteFile(empty, nil, 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	if _, err := readSidecarSum(empty); err == nil {
 		t.Fatal("expected error for empty sidecar")
 	}
@@ -278,10 +289,12 @@ func TestAtomicWriteFile(t *testing.T) {
 	if err := atomicWriteFile(p, []byte("data"), 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	got, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if string(got) != "data" {
 		t.Fatalf("got %q, want data", got)
 	}
@@ -289,6 +302,7 @@ func TestAtomicWriteFile(t *testing.T) {
 	if err := atomicWriteFile(p, []byte("new"), 0644); err != nil {
 		t.Fatal(err)
 	}
+
 	if got, _ := os.ReadFile(p); string(got) != "new" {
 		t.Fatalf("got %q, want new", got)
 	}
@@ -299,9 +313,11 @@ func TestRandHex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(s) != 16 {
 		t.Fatalf("randHex(8) len = %d, want 16", len(s))
 	}
+
 	if other, _ := randHex(8); other == s {
 		t.Fatal("randHex returned identical values")
 	}
@@ -312,16 +328,19 @@ func TestRunAddSyncRestore(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if err := run([]string{"add", repo, backup}); err != nil {
+	if err := run(t.Context(), []string{"add", repo, backup}); err != nil {
 		t.Fatalf("run add: %v", err)
 	}
-	if err := run([]string{"sync"}); err != nil {
+
+	if err := run(t.Context(), []string{"sync"}); err != nil {
 		t.Fatalf("run sync: %v", err)
 	}
+
 	restore := filepath.Join(t.TempDir(), "restored")
-	if err := run([]string{"restore", backup, restore}); err != nil {
+	if err := run(t.Context(), []string{"restore", backup, restore}); err != nil {
 		t.Fatalf("run restore: %v", err)
 	}
+
 	if _, err := os.Stat(filepath.Join(restore, ".git")); err != nil {
 		t.Fatalf("restored repo missing: %v", err)
 	}
@@ -335,7 +354,7 @@ func TestRunUsageErrors(t *testing.T) {
 		{"sync", "a", "b", "c"}, // too many args
 	}
 	for _, args := range cases {
-		if err := run(args); !errors.Is(err, errUsage) {
+		if err := run(t.Context(), args); !errors.Is(err, errUsage) {
 			t.Errorf("run(%q) = %v, want errUsage", args, err)
 		}
 	}

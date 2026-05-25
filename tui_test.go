@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,7 +11,12 @@ import (
 )
 
 func newModel(statuses ...backupStatus) tuiModel {
-	return tuiModel{statuses: statuses, syncing: map[string]bool{}}
+	return tuiModel{
+		ctx:      context.Background(),
+		cancel:   func() {},
+		statuses: statuses,
+		syncing:  map[string]bool{},
+	}
 }
 
 func status(source, target string, st entryState) backupStatus {
@@ -26,6 +32,7 @@ func TestModelInit(t *testing.T) {
 
 func TestModelRefreshNoAutoSync(t *testing.T) {
 	m := newModel()
+
 	updated, _ := m.Update(refreshMsg{status("/a", "/b", stateUnsynced)})
 	if len(updated.(tuiModel).syncing) != 0 {
 		t.Error("auto-sync off: should not start syncs")
@@ -37,10 +44,12 @@ func TestModelRefreshAutoSync(t *testing.T) {
 	m.autoSync = true
 	stale := status("/a", "/b", stateUnsynced)
 	updated, cmd := m.Update(refreshMsg{stale, status("/c", "/d", stateSynced)})
+
 	mm := updated.(tuiModel)
 	if !mm.syncing[entryKey(stale.syncEntry)] {
 		t.Error("auto-sync on: stale entry should be syncing")
 	}
+
 	if cmd == nil {
 		t.Error("expected sync command")
 	}
@@ -52,13 +61,16 @@ func TestModelToggleAutoSync(t *testing.T) {
 	keyA := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}
 
 	updated, cmd := m.Update(keyA)
+
 	mm := updated.(tuiModel)
 	if !mm.autoSync {
 		t.Fatal("pressing a should enable auto-sync")
 	}
+
 	if !mm.syncing[entryKey(stale.syncEntry)] {
 		t.Error("enabling auto-sync should start syncing the stale entry")
 	}
+
 	if cmd == nil {
 		t.Error("expected sync command on enable")
 	}
@@ -74,6 +86,7 @@ func TestModelSyncResultClearsSyncing(t *testing.T) {
 	s.ID = "x"
 	m := newModel(s)
 	m.syncing[entryKey(s.syncEntry)] = true
+
 	updated, _ := m.Update(syncResultMsg{entry: s.syncEntry, err: errUsage})
 	if updated.(tuiModel).syncing[entryKey(s.syncEntry)] {
 		t.Error("syncing flag should be cleared after a result")
@@ -86,13 +99,14 @@ func TestModelSyncResultSynced(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "backup")
 
 	e := syncEntry{Source: repo, Target: target}
-	if _, err := syncConfigured(&e); err != nil { // create a real synced backup
+	if _, err := syncConfigured(t.Context(), &e); err != nil { // create a real synced backup
 		t.Fatal(err)
 	}
 
 	m := newModel(status(repo, target, stateUnsynced))
 	m.statuses[0].syncEntry = e
 	m.syncing[entryKey(e)] = true
+
 	updated, _ := m.Update(syncResultMsg{entry: e, err: nil})
 	if updated.(tuiModel).statuses[0].state != stateSynced {
 		t.Errorf("state = %q, want synced", updated.(tuiModel).statuses[0].state.label())
@@ -110,6 +124,7 @@ func TestModelQuit(t *testing.T) {
 		if !updated.(tuiModel).quitting {
 			t.Errorf("key %q: expected quitting", k.String())
 		}
+
 		if cmd == nil || cmd() != tea.QuitMsg(struct{}{}) {
 			t.Errorf("key %q: expected tea.Quit command", k.String())
 		}
@@ -118,6 +133,7 @@ func TestModelQuit(t *testing.T) {
 
 func TestModelView(t *testing.T) {
 	m := newModel(status("/src", "/dst", stateSynced))
+
 	v := m.View()
 	for _, want := range []string{"/src", "/dst", "OK", "auto-sync", "q: quit"} {
 		if !strings.Contains(v, want) {
@@ -161,14 +177,17 @@ func TestRelTime(t *testing.T) {
 func TestRefreshCmd(t *testing.T) {
 	useTempConfig(t)
 	repo := initRepo(t)
+
 	target := filepath.Join(t.TempDir(), "backup")
 	if err := addCmd([]string{repo, target}); err != nil {
 		t.Fatal(err)
 	}
-	statuses, ok := refreshCmd()().(refreshMsg)
+
+	statuses, ok := refreshCmd(t.Context())().(refreshMsg)
 	if !ok {
 		t.Fatal("refreshCmd did not return refreshMsg")
 	}
+
 	if len(statuses) != 1 || statuses[0].state != stateUnsynced {
 		t.Fatalf("statuses = %v, want one never-synced", statuses)
 	}
@@ -177,13 +196,16 @@ func TestRefreshCmd(t *testing.T) {
 func TestSyncEntryCmd(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
-	r, ok := syncEntryCmd(syncEntry{Source: repo, Target: target})().(syncResultMsg)
+
+	r, ok := syncEntryCmd(t.Context(), syncEntry{Source: repo, Target: target})().(syncResultMsg)
 	if !ok {
 		t.Fatal("syncEntryCmd did not return syncResultMsg")
 	}
+
 	if r.err != nil {
 		t.Fatalf("sync error: %v", r.err)
 	}
+
 	if r.entry.ID == "" {
 		t.Error("first sync should record an id")
 	}
@@ -191,14 +213,18 @@ func TestSyncEntryCmd(t *testing.T) {
 
 func TestPersistID(t *testing.T) {
 	useTempConfig(t)
+
 	if err := saveConfig(&config{Sync: []syncEntry{{Source: "/a", Target: "/b"}}}); err != nil {
 		t.Fatal(err)
 	}
+
 	persistEntry(syncEntry{Source: "/a", Target: "/b", ID: "newid"})
+
 	cfg, _, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if cfg.Sync[0].ID != "newid" {
 		t.Errorf("config id = %q, want newid", cfg.Sync[0].ID)
 	}
