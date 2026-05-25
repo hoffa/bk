@@ -8,11 +8,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image/color"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
+	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 
 	"github.com/hoffa/bk/internal/bk"
@@ -22,8 +26,74 @@ import (
 // process should exit with status 2.
 var errUsage = errors.New("usage")
 
+// command is one subcommand. args is the usage hint shown after the name; run
+// receives the arguments after the command name.
+type command struct {
+	name    string
+	args    string
+	summary string
+	run     func(ctx context.Context, args []string) error
+}
+
+// commands is the dispatch + help table; usage() is generated from it. It's a
+// function (not a var) to avoid a package init cycle: the command funcs
+// transitively reference the table via fixedArgs.
+func commands() []command {
+	return []command{
+		{"init", "[--force]", "set the backup password (run once)", initCmd},
+		{"add", "<repo-path> <backup-dir>", "register a repo -> backup-dir pair", addCmd},
+		{"sync", "", "back up every configured repo", syncCmd},
+		{"status", "", "show the state of every backup", statusCmd},
+		{"remove", "<id>", "remove a backup from the config (id from 'bk status')", removeCmd},
+		{"restore", "<backup-dir> <restore-path>", "restore a backup's latest", restoreCmd},
+	}
+}
+
 func usage() {
-	fmt.Fprint(os.Stderr, "usage: bk <command> <args>\n\ncommands:\n  init                                  set the backup password (run once)\n  add <repo-path> <backup-dir>          register a repo -> backup-dir pair in the config\n  sync                                  all configured backups\n  status                                show the state of every configured backup\n  remove <id>                           remove a backup from the config (id from 'bk status')\n  restore <backup-dir> <restore-path>   restore a backup's latest")
+	fmt.Fprint(os.Stderr, "usage: bk <command> [args]\n\ncommands:\n")
+
+	for _, c := range commands() {
+		fmt.Fprintf(os.Stderr, "  %-36s %s\n", strings.TrimSpace(c.name+" "+c.args), c.summary)
+	}
+}
+
+// fixedArgs parses raw (catching unknown flags / -h) and requires exactly n
+// positional arguments, printing the command's usage line otherwise.
+func fixedArgs(name string, raw []string, n int) ([]string, error) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	_ = fs.Parse(raw) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() != n {
+		fmt.Fprintf(os.Stderr, "usage: bk %s\n", usageLine(name))
+		return nil, errUsage
+	}
+
+	return fs.Args(), nil
+}
+
+// usageLine returns "<name> <args>" for a command, the single source of its hint.
+func usageLine(name string) string {
+	for _, c := range commands() {
+		if c.name == name {
+			return strings.TrimSpace(name + " " + c.args)
+		}
+	}
+
+	return name
+}
+
+// colorEnabled reports whether to emit color to w (a terminal, NO_COLOR unset).
+func colorEnabled(w io.Writer) bool {
+	return os.Getenv("NO_COLOR") == "" && isTerminal(w)
+}
+
+// paint colors s for w when color is enabled, otherwise returns it unchanged.
+func paint(w io.Writer, c color.Color, s string) string {
+	if !colorEnabled(w) {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(c).Render(s)
 }
 
 // readPassword returns the backup password from $BK_PASSWORD (handy for scripts
@@ -70,34 +140,13 @@ func readNewPassword() (string, error) {
 	return pw, nil
 }
 
-func statusCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("status", flag.ExitOnError)
+func initCmd(_ context.Context, args []string) error {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	force := fs.Bool("force", false, "replace an existing key (existing backups become unreadable)")
 	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
 
 	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk status")
-		return errUsage
-	}
-
-	statuses, err := evalAll(ctx)
-	if err != nil {
-		return err
-	}
-
-	if len(statuses) == 0 {
-		fmt.Println("no backups configured; add one with: bk add <repo> <backup-dir>")
-		return nil
-	}
-
-	return printStatus(os.Stdout, statuses)
-}
-
-func syncCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ExitOnError)
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
-
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk sync")
+		fmt.Fprintln(os.Stderr, "usage: bk init [--force]")
 		return errUsage
 	}
 
@@ -106,71 +155,47 @@ func syncCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if len(cfg.Sync) == 0 {
-		path, _ := bk.ConfigPath()
-		return fmt.Errorf("no sync entries in %s; add one with: bk add <repo> <backup-dir>", path)
+	if cfg.HasKey() && !*force {
+		return errors.New("already initialized (use --force to set a new password, abandoning existing backups)")
 	}
 
-	// Sync each entry, reporting progress. A missing target (unplugged drive) is
-	// a skip, not a failure; other errors are reported but don't stop the rest.
-	var (
-		failed int
-		dirty  bool
-	)
-
-	for i := range cfg.Sync {
-		e := &cfg.Sync[i]
-
-		firstSync := e.Backup == nil
-		synced, err := bk.Sync(ctx, e, cfg.Key)
-
-		switch {
-		case errors.Is(err, bk.ErrTargetAbsent):
-			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
-		case err != nil:
-			fmt.Fprintf(os.Stderr, "error %s -> %s: %v\n", e.Source, e.Target, err)
-
-			failed++
-		case synced:
-			fmt.Printf("synced %s -> %s\n", e.Source, e.Target)
-		default:
-			fmt.Printf("up to date %s -> %s\n", e.Source, e.Target)
-		}
-
-		// A first sync records the backup cache; a new version updates it.
-		if err == nil && (firstSync || synced) {
-			dirty = true
-		}
+	if cfg.HasKey() {
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, lipgloss.Yellow, "WARNING:")+" --force creates a NEW key. Existing backups stay locked to the")
+		fmt.Fprintln(os.Stderr, "OLD password and bk will not use them; wipe or replace their targets to")
+		fmt.Fprintln(os.Stderr, "back up again under the new password. This cannot be undone.")
 	}
 
-	if dirty {
-		if err := cfg.Save(); err != nil {
-			return fmt.Errorf("save config: %w", err)
-		}
+	pw, err := readNewPassword()
+	if err != nil {
+		return err
 	}
 
-	if failed > 0 {
-		return fmt.Errorf("%d of %d entries failed", failed, len(cfg.Sync))
+	if err := cfg.SetPassword(pw); err != nil {
+		return err
 	}
+
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+
+	fmt.Println("Initialized. Backups are encrypted with this password.")
+	fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
 
 	return nil
 }
 
 func addCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("add", flag.ExitOnError)
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
-
-	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: bk add <repo-path> <backup-dir>")
-		return errUsage
-	}
-
-	source, err := filepath.Abs(fs.Arg(0))
+	a, err := fixedArgs("add", args, 2)
 	if err != nil {
 		return err
 	}
 
-	target, err := filepath.Abs(fs.Arg(1))
+	source, err := filepath.Abs(a[0])
+	if err != nil {
+		return err
+	}
+
+	target, err := filepath.Abs(a[1])
 	if err != nil {
 		return err
 	}
@@ -204,14 +229,9 @@ func addCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
-func initCmd(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	force := fs.Bool("force", false, "replace an existing key (existing backups become unreadable)")
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
-
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk init [--force]")
-		return errUsage
+func syncCmd(ctx context.Context, args []string) error {
+	if _, err := fixedArgs("sync", args, 0); err != nil {
+		return err
 	}
 
 	cfg, err := bk.Load()
@@ -219,42 +239,78 @@ func initCmd(args []string) error {
 		return err
 	}
 
-	if cfg.HasKey() && !*force {
-		return errors.New("already initialized (use --force to set a new password, abandoning existing backups)")
+	if len(cfg.Sync) == 0 {
+		path, _ := bk.ConfigPath()
+		return fmt.Errorf("no sync entries in %s; add one with: bk add <repo> <backup-dir>", path)
 	}
 
-	if cfg.HasKey() {
-		fmt.Fprintln(os.Stderr, "WARNING: --force creates a NEW key. Existing backups stay locked to the OLD")
-		fmt.Fprintln(os.Stderr, "password and bk will not use them; wipe or replace their targets to back up")
-		fmt.Fprintln(os.Stderr, "again under the new password. This cannot be undone.")
+	// Sync each entry, reporting progress. A missing target (unplugged drive) is
+	// a skip, not a failure; other errors are reported but don't stop the rest.
+	var (
+		failed int
+		dirty  bool
+	)
+
+	for i := range cfg.Sync {
+		e := &cfg.Sync[i]
+
+		firstSync := e.Backup == nil
+		synced, err := bk.Sync(ctx, e, cfg.Key)
+
+		switch {
+		case errors.Is(err, bk.ErrTargetAbsent):
+			fmt.Printf("%s %s -> %s: target not present\n", paint(os.Stdout, lipgloss.BrightBlack, "skip"), e.Source, e.Target)
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "%s %s -> %s: %v\n", paint(os.Stderr, lipgloss.Red, "error"), e.Source, e.Target, err)
+
+			failed++
+		case synced:
+			fmt.Printf("%s %s -> %s\n", paint(os.Stdout, lipgloss.Green, "synced"), e.Source, e.Target)
+		default:
+			fmt.Printf("%s %s -> %s\n", paint(os.Stdout, lipgloss.BrightBlack, "up to date"), e.Source, e.Target)
+		}
+
+		// A first sync records the backup cache; a new version updates it.
+		if err == nil && (firstSync || synced) {
+			dirty = true
+		}
 	}
 
-	pw, err := readNewPassword()
-	if err != nil {
-		return err
+	if dirty {
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
 	}
 
-	if err := cfg.SetPassword(pw); err != nil {
-		return err
+	if failed > 0 {
+		return fmt.Errorf("%d of %d entries failed", failed, len(cfg.Sync))
 	}
-
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-
-	fmt.Println("Initialized. Backups are encrypted with this password.")
-	fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
 
 	return nil
 }
 
-func removeCmd(args []string) error {
-	fs := flag.NewFlagSet("remove", flag.ExitOnError)
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
+func statusCmd(ctx context.Context, args []string) error {
+	if _, err := fixedArgs("status", args, 0); err != nil {
+		return err
+	}
 
-	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: bk remove <id>")
-		return errUsage
+	statuses, err := evalAll(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(statuses) == 0 {
+		fmt.Println("no backups configured; add one with: bk add <repo> <backup-dir>")
+		return nil
+	}
+
+	return printStatus(os.Stdout, statuses)
+}
+
+func removeCmd(_ context.Context, args []string) error {
+	a, err := fixedArgs("remove", args, 1)
+	if err != nil {
+		return err
 	}
 
 	cfg, err := bk.Load()
@@ -262,7 +318,7 @@ func removeCmd(args []string) error {
 		return err
 	}
 
-	e, err := cfg.Match(fs.Arg(0))
+	e, err := cfg.Match(a[0])
 	if err != nil {
 		return err
 	}
@@ -282,12 +338,9 @@ func removeCmd(args []string) error {
 }
 
 func restoreCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("restore", flag.ExitOnError)
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
-
-	if fs.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "usage: bk restore <backup-dir> <restore-path>")
-		return errUsage
+	a, err := fixedArgs("restore", args, 2)
+	if err != nil {
+		return err
 	}
 
 	pw, err := readPassword("Enter backup password: ")
@@ -295,11 +348,11 @@ func restoreCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if err := bk.Restore(ctx, fs.Arg(0), fs.Arg(1), pw); err != nil {
+	if err := bk.Restore(ctx, a[0], a[1], pw); err != nil {
 		return err
 	}
 
-	fmt.Printf("restored %s -> %s\n", fs.Arg(0), fs.Arg(1))
+	fmt.Printf("restored %s -> %s\n", a[0], a[1])
 
 	return nil
 }
@@ -311,24 +364,16 @@ func run(ctx context.Context, args []string) error {
 		return dashboard(ctx, os.Stdout)
 	}
 
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "init":
-		return initCmd(rest)
-	case "sync":
-		return syncCmd(ctx, rest)
-	case "add":
-		return addCmd(ctx, rest)
-	case "status":
-		return statusCmd(ctx, rest)
-	case "remove":
-		return removeCmd(rest)
-	case "restore":
-		return restoreCmd(ctx, rest)
-	default:
-		usage()
-		return errUsage
+	name, rest := args[0], args[1:]
+	for _, c := range commands() {
+		if c.name == name {
+			return c.run(ctx, rest)
+		}
 	}
+
+	usage()
+
+	return errUsage
 }
 
 // Main runs a bk invocation and returns the process exit code. It owns signal
@@ -344,7 +389,7 @@ func Main(args []string) int {
 	case errors.Is(err, errUsage):
 		return 2
 	default:
-		fmt.Fprintln(os.Stderr, "error:", err)
+		fmt.Fprintln(os.Stderr, paint(os.Stderr, lipgloss.Red, "error:"), err)
 		return 1
 	}
 }
