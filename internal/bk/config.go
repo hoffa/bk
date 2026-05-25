@@ -91,24 +91,24 @@ func (c *Config) Save() error {
 	return util.AtomicWrite(path, append(data, '\n'), 0644)
 }
 
-// Add appends a source -> target backup with a fresh handle, returning an error
-// if the exact pair is already configured. The target is initialized on the first
-// Sync, so it need not exist yet. The caller must Save to persist.
-func (c *Config) Add(source, target string) error {
+// Add appends a source -> target backup with a fresh handle and returns its id,
+// erroring if the exact pair is already configured. The target is initialized on
+// the first Sync, so it need not exist yet. The caller must Save to persist.
+func (c *Config) Add(source, target string) (string, error) {
 	for _, e := range c.Sync {
 		if e.Source == source && e.Target == target {
-			return fmt.Errorf("already configured: %s -> %s", source, target)
+			return "", fmt.Errorf("already configured: %s -> %s", source, target)
 		}
 	}
 
 	id, err := util.RandHex(16)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	c.Sync = append(c.Sync, Entry{ID: id, Source: source, Target: target})
 
-	return nil
+	return id, nil
 }
 
 // Match returns the single entry whose ID starts with prefix, erroring if no

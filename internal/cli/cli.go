@@ -216,7 +216,8 @@ func addCmd(ctx context.Context, args []string) error {
 
 	// Pure config: the target is initialized on first sync, so it need not be
 	// present now.
-	if err := cfg.Add(source, target); err != nil {
+	id, err := cfg.Add(source, target)
+	if err != nil {
 		return err
 	}
 
@@ -224,7 +225,7 @@ func addCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	fmt.Printf("added %s -> %s (run 'bk sync' to back up)\n", source, target)
+	fmt.Println(id)
 
 	return nil
 }

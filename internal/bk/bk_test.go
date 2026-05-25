@@ -40,15 +40,21 @@ func TestConfigRoundTrip(t *testing.T) {
 
 func TestAdd(t *testing.T) {
 	cfg := &Config{}
-	if err := cfg.Add("/a", "/b"); err != nil {
+
+	id, err := cfg.Add("/a", "/b")
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(cfg.Sync) != 1 || cfg.Sync[0].ID == "" || cfg.Sync[0].Backup != nil {
-		t.Fatalf("expected one entry with an id and no backup yet, got %+v", cfg.Sync)
+	if id == "" {
+		t.Fatal("Add returned an empty id")
 	}
 
-	if err := cfg.Add("/a", "/b"); err == nil {
+	if len(cfg.Sync) != 1 || cfg.Sync[0].ID != id || cfg.Sync[0].Backup != nil {
+		t.Fatalf("expected one entry with id %q and no backup yet, got %+v", id, cfg.Sync)
+	}
+
+	if _, err := cfg.Add("/a", "/b"); err == nil {
 		t.Fatal("expected duplicate add to fail")
 	}
 }
