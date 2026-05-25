@@ -7,35 +7,35 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hoffa/bk/internal/git"
+	"github.com/hoffa/bk/internal/bk"
 )
 
 func TestStatusCode(t *testing.T) {
 	cases := []struct {
-		s       entryState
+		s       bk.State
 		present bool
 		want    string
 	}{
-		{stateSynced, true, "OK"},
-		{stateSynced, false, "OK?"},
-		{stateStale, true, "STALE"},
-		{stateStale, false, "STALE?"}, // "?" = unverified (offline)
-		{stateUnsynced, true, "NEW"},
-		{stateError, true, "ERROR"},
+		{bk.StateSynced, true, "OK"},
+		{bk.StateSynced, false, "OK?"},
+		{bk.StateStale, true, "STALE"},
+		{bk.StateStale, false, "STALE?"}, // "?" = unverified (offline)
+		{bk.StateUnsynced, true, "NEW"},
+		{bk.StateError, true, "ERROR"},
 	}
 	for _, c := range cases {
 		if got := statusCode(c.s, c.present); got != c.want {
-			t.Errorf("statusCode(%s, present=%v) = %q, want %q", c.s.label(), c.present, got, c.want)
+			t.Errorf("statusCode(%s, present=%v) = %q, want %q", c.s.Label(), c.present, got, c.want)
 		}
 	}
 }
 
 func TestBadge(t *testing.T) {
-	// Plain badge: ASCII only, fixed 7-column width, no escapes.
-	for _, s := range []entryState{stateSynced, stateStale, stateUnsynced, stateError} {
+	// Plain badge: ASCII only, fixed-width, no escapes.
+	for _, s := range []bk.State{bk.StateSynced, bk.StateStale, bk.StateUnsynced, bk.StateError} {
 		plain := badge(false, s, true)
 		if len(plain) != 8 {
-			t.Errorf("plain badge for %s = %q (width %d, want 8)", s.label(), plain, len(plain))
+			t.Errorf("plain badge for %s = %q (width %d, want 8)", s.Label(), plain, len(plain))
 		}
 
 		if strings.Contains(plain, "\033[") {
@@ -43,79 +43,12 @@ func TestBadge(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(badge(false, stateSynced, true), "OK") {
+	if !strings.Contains(badge(false, bk.StateSynced, true), "OK") {
 		t.Error("badge missing code text")
 	}
 	// Colored badge wraps the code in an ANSI background.
-	if c := badge(true, stateError, true); !strings.Contains(c, "ERR") || !strings.Contains(c, "\033[") {
+	if c := badge(true, bk.StateError, true); !strings.Contains(c, "ERR") || !strings.Contains(c, "\033[") {
 		t.Errorf("colored badge = %q", c)
-	}
-}
-
-func TestEvalEntryStates(t *testing.T) {
-	useTempConfig(t)
-	repo := initRepo(t)
-	target := filepath.Join(t.TempDir(), "backup")
-
-	// never synced: id empty, parent exists.
-	if s := evalEntry(t.Context(), syncEntry{Source: repo, Target: target}); s != stateUnsynced {
-		t.Errorf("fresh entry state = %q, want never synced", s.label())
-	}
-
-	// absent target with an id but no refs cache reads as out of date (offline).
-	st := evalStatus(t.Context(), syncEntry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x"})
-	if st.present {
-		t.Error("missing target should not be present")
-	}
-
-	if st.state != stateStale {
-		t.Errorf("absent uncached state = %q, want out of date", st.state.label())
-	}
-
-	// absent target whose cached refs match the source reads as synced (offline).
-	rh, err := git.RefsHash(t.Context(), repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	st = evalStatus(t.Context(), syncEntry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), ID: "x", RefsHash: rh})
-	if st.present || st.state != stateSynced {
-		t.Errorf("absent cached-current state = %q present=%v, want synced offline", st.state.label(), st.present)
-	}
-
-	// synced after a sync, stale after a new commit.
-	if err := addCmd([]string{repo, target}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := syncAll(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, _, err := loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if s := evalEntry(t.Context(), cfg.Sync[0]); s != stateSynced {
-		t.Errorf("after sync state = %q, want synced", s.label())
-	}
-
-	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
-
-	if s := evalEntry(t.Context(), cfg.Sync[0]); s != stateStale {
-		t.Errorf("after commit state = %q, want out of date", s.label())
-	}
-}
-
-func TestEvalStatusUnusableTarget(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "junk"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Never-synced entry whose target is a non-empty non-backup dir -> error.
-	if s := evalStatus(t.Context(), syncEntry{Source: "/x", Target: dir}); s.state != stateError {
-		t.Errorf("state = %q, want error", s.state.label())
 	}
 }
 
@@ -152,8 +85,8 @@ func TestDashboardNonTTYStatus(t *testing.T) {
 	if !strings.Contains(buf.String(), target) {
 		t.Errorf("status missing target:\n%s", buf.String())
 	}
-
-	if _, err := readLatest(target); err == nil {
-		t.Error("dashboard should not have synced (no latest.json expected)")
+	// The dashboard is read-only: it must not have created/synced the target.
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("dashboard should not have created the target")
 	}
 }

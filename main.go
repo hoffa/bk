@@ -12,6 +12,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"github.com/hoffa/bk/internal/bk"
 )
 
 // errUsage signals a usage error: the message has already been printed and the
@@ -31,7 +33,7 @@ func statusCmd(ctx context.Context, args []string) error {
 		return errUsage
 	}
 
-	statuses, err := statusAll(ctx)
+	statuses, err := evalAll(ctx)
 	if err != nil {
 		return err
 	}
@@ -53,7 +55,56 @@ func syncCmd(ctx context.Context, args []string) error {
 		return errUsage
 	}
 
-	return syncAll(ctx)
+	cfg, err := bk.Load()
+	if err != nil {
+		return err
+	}
+
+	if len(cfg.Sync) == 0 {
+		path, _ := bk.ConfigPath()
+		return fmt.Errorf("no sync entries in %s; add one with: bk add <repo> <backup-dir>", path)
+	}
+
+	// Sync each entry, reporting progress. A missing target (unplugged drive) is
+	// a skip, not a failure; other errors are reported but don't stop the rest.
+	var (
+		failed int
+		dirty  bool
+	)
+
+	for i := range cfg.Sync {
+		e := &cfg.Sync[i]
+
+		before := *e
+		switch synced, err := bk.Sync(ctx, e); {
+		case errors.Is(err, bk.ErrTargetAbsent):
+			fmt.Printf("skip %s -> %s: target not present\n", e.Source, e.Target)
+		case err != nil:
+			fmt.Fprintf(os.Stderr, "error %s -> %s: %v\n", e.Source, e.Target, err)
+
+			failed++
+		case synced:
+			fmt.Printf("synced %s -> %s\n", e.Source, e.Target)
+		default:
+			fmt.Printf("up to date %s -> %s\n", e.Source, e.Target)
+		}
+
+		if *e != before {
+			dirty = true // first-sync id and/or refs hash recorded
+		}
+	}
+
+	if dirty {
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("save config: %w", err)
+		}
+	}
+
+	if failed > 0 {
+		return fmt.Errorf("%d of %d entries failed", failed, len(cfg.Sync))
+	}
+
+	return nil
 }
 
 func addCmd(args []string) error {
@@ -75,21 +126,18 @@ func addCmd(args []string) error {
 		return err
 	}
 
-	cfg, _, err := loadConfig()
+	cfg, err := bk.Load()
 	if err != nil {
 		return err
 	}
 
-	for _, e := range cfg.Sync {
-		if e.Source == source && e.Target == target {
-			return fmt.Errorf("already configured: %s -> %s", source, target)
-		}
-	}
-
 	// Pure config: the target is initialized on first sync, so it need not be
 	// present now.
-	cfg.Sync = append(cfg.Sync, syncEntry{Source: source, Target: target})
-	if err := saveConfig(cfg); err != nil {
+	if err := cfg.Add(source, target); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
 		return err
 	}
 
@@ -107,7 +155,13 @@ func restoreCmd(ctx context.Context, args []string) error {
 		return errUsage
 	}
 
-	return restoreBackup(ctx, fs.Arg(0), fs.Arg(1))
+	if err := bk.Restore(ctx, fs.Arg(0), fs.Arg(1)); err != nil {
+		return err
+	}
+
+	fmt.Printf("restored %s -> %s\n", fs.Arg(0), fs.Arg(1))
+
+	return nil
 }
 
 // run dispatches a command and returns an error; errUsage means usage was

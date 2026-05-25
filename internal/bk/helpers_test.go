@@ -1,11 +1,9 @@
-package main
+package bk
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -63,50 +61,4 @@ func useTempConfig(t *testing.T) string {
 	t.Setenv("BK_CONFIG", path)
 
 	return path
-}
-
-func TestRunAddSyncRestore(t *testing.T) {
-	useTempConfig(t)
-	repo := initRepo(t)
-	backup := filepath.Join(t.TempDir(), "backup")
-
-	if err := run(t.Context(), []string{"add", repo, backup}); err != nil {
-		t.Fatalf("run add: %v", err)
-	}
-
-	if err := run(t.Context(), []string{"sync"}); err != nil {
-		t.Fatalf("run sync: %v", err)
-	}
-
-	restore := filepath.Join(t.TempDir(), "restored")
-	if err := run(t.Context(), []string{"restore", backup, restore}); err != nil {
-		t.Fatalf("run restore: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(restore, ".git")); err != nil {
-		t.Fatalf("restored repo missing: %v", err)
-	}
-}
-
-func TestRunSyncNoEntries(t *testing.T) {
-	useTempConfig(t)
-
-	err := run(t.Context(), []string{"sync"})
-	if err == nil || errors.Is(err, errUsage) || !strings.Contains(err.Error(), "no sync entries") {
-		t.Fatalf("want no-entries error, got %v", err)
-	}
-}
-
-func TestRunUsageErrors(t *testing.T) {
-	cases := [][]string{
-		{"bogus"},               // unknown command
-		{"sync", "a"},           // too few args
-		{"restore", "a"},        // too few args
-		{"sync", "a", "b", "c"}, // too many args
-	}
-	for _, args := range cases {
-		if err := run(t.Context(), args); !errors.Is(err, errUsage) {
-			t.Errorf("run(%q) = %v, want errUsage", args, err)
-		}
-	}
 }

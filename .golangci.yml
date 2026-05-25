@@ -27,6 +27,7 @@ linters:
     - noinlineerr
     - paralleltest
     - recvcheck
+    - testpackage # white-box tests are fine; the core exercises internals
     - unparam
     - varnamelen
     - wrapcheck

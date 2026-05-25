@@ -4,151 +4,27 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"text/tabwriter"
-	"time"
 
-	"github.com/hoffa/bk/internal/git"
-	"github.com/hoffa/bk/internal/util"
+	"github.com/hoffa/bk/internal/bk"
 )
 
-// entryState is a configured backup's currency. It is the shared core model
-// behind both `bk status` and the dashboard. Whether the target is currently
-// connected is tracked separately (backupStatus.present).
-type entryState int
-
-const (
-	stateChecking entryState = iota // not yet evaluated (zero value)
-	stateSynced                     // up to date
-	stateStale                      // repo changed since last sync
-	stateUnsynced                   // never synced
-	stateError                      // misconfigured or unreadable
-)
-
-func (s entryState) label() string {
-	switch s {
-	case stateSynced:
-		return "synced"
-	case stateStale:
-		return "out of date"
-	case stateUnsynced:
-		return "never synced"
-	case stateChecking:
-		return "checking"
-	default:
-		return "error"
-	}
-}
-
-// needsSync reports whether syncing the entry would create a new version.
-func (s entryState) needsSync() bool {
-	return s == stateStale || s == stateUnsynced
-}
-
-// backupStatus is an entry's currency plus presence and display details.
-type backupStatus struct {
-	syncEntry
-
-	state    entryState
-	present  bool      // target currently reachable
-	versions int       // only when present and a valid backup
-	lastSync time.Time // zero if unknown
-}
-
-// statusAll returns the state of every configured entry.
-func statusAll(ctx context.Context) ([]backupStatus, error) {
-	cfg, _, err := loadConfig()
+// evalAll loads the config and evaluates every entry. It's the front-end's
+// convenience over the core's per-entry bk.Eval, used by `bk status` and the
+// dashboard.
+func evalAll(ctx context.Context) ([]bk.Status, error) {
+	cfg, err := bk.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]backupStatus, 0, len(cfg.Sync))
+	out := make([]bk.Status, 0, len(cfg.Sync))
 	for _, e := range cfg.Sync {
-		out = append(out, evalStatus(ctx, e))
+		out = append(out, bk.Eval(ctx, e))
 	}
 
 	return out, nil
-}
-
-// evalStatus computes one entry's currency and presence without modifying
-// anything. When the target is present its latest.json is authoritative; when
-// absent, currency is inferred from the cached refs hash (best effort).
-func evalStatus(ctx context.Context, e syncEntry) backupStatus {
-	s := backupStatus{syncEntry: e}
-
-	target, err := filepath.Abs(e.Target)
-	if err != nil {
-		s.state = stateError
-		return s
-	}
-
-	s.present = util.Exists(target)
-
-	if e.ID == "" {
-		// Never synced. If the target exists but isn't safe to initialize
-		// (non-empty, not a backup), surface an error instead of NEW so we
-		// don't keep trying to write into it.
-		if s.present {
-			if ok, err := backupDirUsable(target); err != nil || !ok {
-				s.state = stateError
-				return s
-			}
-		}
-
-		s.state = stateUnsynced
-
-		return s
-	}
-
-	if !s.present {
-		// Offline: judge currency from the cached last-synced refs.
-		s.state = stateStale
-
-		if e.RefsHash != "" {
-			if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == e.RefsHash {
-				s.state = stateSynced
-			}
-		}
-
-		return s
-	}
-
-	// Present: the target is authoritative.
-	meta, err := loadBackupMeta(target)
-	if err != nil {
-		s.state = stateError
-		return s
-	}
-
-	if meta.ID != e.ID {
-		s.state = stateError
-		return s
-	}
-
-	latest, err := readLatest(target)
-	if err != nil {
-		s.state = stateStale
-		return s
-	}
-
-	s.lastSync = latest.SyncedAt
-	if bundles, _ := filepath.Glob(filepath.Join(target, versionsDir, "*.bundle")); bundles != nil {
-		s.versions = len(bundles)
-	}
-
-	if rh, err := git.RefsHash(ctx, e.Source); err == nil && rh == latest.RefsHash {
-		s.state = stateSynced
-	} else {
-		s.state = stateStale
-	}
-
-	return s
-}
-
-// evalEntry returns just an entry's currency state.
-func evalEntry(ctx context.Context, e syncEntry) entryState {
-	return evalStatus(ctx, e).state
 }
 
 // short returns the first n characters of s.
@@ -161,7 +37,7 @@ func short(s string, n int) string {
 }
 
 // printStatus renders entry statuses as an aligned table.
-func printStatus(w io.Writer, statuses []backupStatus) error {
+func printStatus(w io.Writer, statuses []bk.Status) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	// Buffered writes; any error surfaces on Flush.
 	_, _ = fmt.Fprintln(tw, "ID\tSOURCE\tTARGET\tSTATE\tVERSIONS\tLAST SYNC")
@@ -172,15 +48,15 @@ func printStatus(w io.Writer, statuses []backupStatus) error {
 			id = short(s.ID, 12)
 		}
 
-		if s.versions > 0 {
-			versions = strconv.Itoa(s.versions)
+		if s.Versions > 0 {
+			versions = strconv.Itoa(s.Versions)
 		}
 
-		if !s.lastSync.IsZero() {
-			last = s.lastSync.Format("2006-01-02 15:04:05Z")
+		if !s.LastSync.IsZero() {
+			last = s.LastSync.Format("2006-01-02 15:04:05Z")
 		}
 
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, statusCode(s.state, s.present), versions, last)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", id, s.Source, s.Target, statusCode(s.State, s.Present), versions, last)
 	}
 
 	return tw.Flush()

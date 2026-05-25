@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/hoffa/bk/internal/bk"
 )
 
 // dashboard is the `bk` (no args) entry point. On a terminal it runs the live
@@ -15,7 +17,7 @@ func dashboard(ctx context.Context, w io.Writer) error {
 		return runTUI(ctx)
 	}
 
-	statuses, err := statusAll(ctx)
+	statuses, err := evalAll(ctx)
 	if err != nil {
 		return err
 	}
@@ -31,20 +33,20 @@ func dashboard(ctx context.Context, w io.Writer) error {
 // statusCode is the short ASCII code for a state + presence. A trailing "?"
 // means unverified: the target is absent, so the verdict is inferred from the
 // last sync recorded in the config rather than confirmed against the target.
-func statusCode(s entryState, present bool) string {
+func statusCode(s bk.State, present bool) string {
 	q := ""
 	if !present {
 		q = "?"
 	}
 
 	switch s {
-	case stateSynced:
+	case bk.StateSynced:
 		return "OK" + q
-	case stateStale:
+	case bk.StateStale:
 		return "STALE" + q
-	case stateUnsynced:
+	case bk.StateUnsynced:
 		return "NEW"
-	case stateError:
+	case bk.StateError:
 		return "ERROR"
 	default:
 		return "--"
@@ -56,7 +58,7 @@ const badgeWidth = 8
 
 // badge renders a status code as a fixed-width cell, colored as a background
 // badge (like a test runner's PASS/FAIL) when color is enabled.
-func badge(color bool, s entryState, present bool) string {
+func badge(color bool, s bk.State, present bool) string {
 	return badgeText(color, badgeColor(s), statusCode(s, present))
 }
 
@@ -75,13 +77,13 @@ func badgeText(color bool, ansiColor, text string) string {
 
 // badgeColor is the ANSI foreground color for a state's badge (reverse video
 // turns it into the background).
-func badgeColor(s entryState) string {
+func badgeColor(s bk.State) string {
 	switch s {
-	case stateSynced:
+	case bk.StateSynced:
 		return "32" // green
-	case stateStale:
+	case bk.StateStale:
 		return "33" // yellow
-	case stateError:
+	case bk.StateError:
 		return "31" // red
 	default: // unsynced, checking
 		return "90" // grey

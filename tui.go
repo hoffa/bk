@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/hoffa/bk/internal/bk"
 )
 
 // tickInterval is how often the TUI reloads the config and re-checks backups.
@@ -14,21 +16,21 @@ const tickInterval = 2 * time.Second
 
 // entryKey identifies a configured entry stably across config reloads, so
 // syncing state survives entries being added or removed between ticks.
-func entryKey(e syncEntry) string {
+func entryKey(e bk.Entry) string {
 	return e.Source + "\x00" + e.Target
 }
 
 // tuiModel is the live status dashboard. By default it only shows status; auto
 // sync is opt-in via a key. It is a thin view over the core: each tick it
-// reloads the config and re-evaluates via statusAll, and (when auto sync is on)
-// syncs out-of-date entries via syncConfigured. All work happens off the UI
-// goroutine via commands.
+// reloads the config and re-evaluates via bk.Eval, and (when auto sync is on)
+// syncs out-of-date entries via bk.Sync. All work happens off the UI goroutine
+// via commands.
 type tuiModel struct {
 	// ctx is cancelled when the user quits, so in-flight git commands launched
 	// as commands stop instead of running on after the UI is gone.
 	ctx           context.Context
 	cancel        context.CancelFunc
-	statuses      []backupStatus
+	statuses      []bk.Status
 	syncing       map[string]bool
 	autoSync      bool
 	quitting      bool
@@ -37,9 +39,9 @@ type tuiModel struct {
 
 type (
 	tickMsg       time.Time
-	refreshMsg    []backupStatus
+	refreshMsg    []bk.Status
 	syncResultMsg struct {
-		entry syncEntry
+		entry bk.Entry
 		err   error
 	}
 )
@@ -88,7 +90,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(refreshCmd(m.ctx), tickCmd())
 
 	case refreshMsg:
-		m.statuses = []backupStatus(msg)
+		m.statuses = []bk.Status(msg)
 		if m.autoSync {
 			return m, m.startSyncs()
 		}
@@ -102,11 +104,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			persistEntry(msg.entry) // record first-sync id + refs hash to the config
 		}
-		// Re-evaluate so the row reflects reality (errTargetAbsent, etc.) rather
+		// Re-evaluate so the row reflects reality (ErrTargetAbsent, etc.) rather
 		// than forcing an error color on a transient failure.
 		for i := range m.statuses {
-			if entryKey(m.statuses[i].syncEntry) == k {
-				m.statuses[i] = evalStatus(m.ctx, msg.entry)
+			if entryKey(m.statuses[i].Entry) == k {
+				m.statuses[i] = bk.Eval(m.ctx, msg.entry)
 				break
 			}
 		}
@@ -141,12 +143,12 @@ func (m tuiModel) View() string {
 		}
 
 		for _, s := range m.statuses {
-			bg := badge(true, s.state, s.present)
-			if m.syncing[entryKey(s.syncEntry)] {
+			bg := badge(true, s.State, s.Present)
+			if m.syncing[entryKey(s.Entry)] {
 				bg = badgeText(true, "36", "SYNC") // cyan
 			}
 
-			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.lastSync))
+			_, _ = fmt.Fprintf(&b, "%s  %-*s  %-*s  %s\n", bg, srcW, s.Source, tgtW, s.Target, relTime(s.LastSync))
 			lines++
 		}
 	}
@@ -161,12 +163,12 @@ func (m tuiModel) startSyncs() tea.Cmd {
 	var cmds []tea.Cmd
 
 	for _, s := range m.statuses {
-		k := entryKey(s.syncEntry)
+		k := entryKey(s.Entry)
 		// Only sync targets that are actually connected.
-		if s.present && s.state.needsSync() && !m.syncing[k] {
+		if s.Present && s.State.NeedsSync() && !m.syncing[k] {
 			m.syncing[k] = true
 
-			cmds = append(cmds, syncEntryCmd(m.ctx, s.syncEntry))
+			cmds = append(cmds, syncEntryCmd(m.ctx, s.Entry))
 		}
 	}
 
@@ -216,7 +218,7 @@ func relTime(t time.Time) string {
 // refreshCmd reloads the config and evaluates every entry off the UI goroutine.
 func refreshCmd(ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
-		statuses, err := statusAll(ctx)
+		statuses, err := evalAll(ctx)
 		if err != nil {
 			return refreshMsg(nil)
 		}
@@ -227,10 +229,10 @@ func refreshCmd(ctx context.Context) tea.Cmd {
 
 // syncEntryCmd syncs one entry off the UI goroutine, working on a copy so the
 // result can be applied back in Update without a data race.
-func syncEntryCmd(ctx context.Context, e syncEntry) tea.Cmd {
+func syncEntryCmd(ctx context.Context, e bk.Entry) tea.Cmd {
 	return func() tea.Msg {
 		ec := e
-		_, err := syncConfigured(ctx, &ec)
+		_, err := bk.Sync(ctx, &ec)
 
 		return syncResultMsg{entry: ec, err: err}
 	}
@@ -243,8 +245,8 @@ func tickCmd() tea.Cmd {
 // persistEntry writes a synced entry's id and refs hash back to the config,
 // merging into the current on-disk config so a concurrent `bk add` isn't
 // clobbered.
-func persistEntry(e syncEntry) {
-	cfg, _, err := loadConfig()
+func persistEntry(e bk.Entry) {
+	cfg, err := bk.Load()
 	if err != nil {
 		return
 	}
@@ -269,6 +271,6 @@ func persistEntry(e syncEntry) {
 	}
 
 	if changed {
-		_ = saveConfig(cfg)
+		_ = cfg.Save()
 	}
 }

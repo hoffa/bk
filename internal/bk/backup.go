@@ -1,4 +1,4 @@
-package main
+package bk
 
 import (
 	"context"
@@ -136,17 +136,17 @@ func syncBackup(ctx context.Context, repoPath, backupDir string) (bool, error) {
 	return true, nil
 }
 
-// restoreBackup restores the latest version of the backup at backupDir into
-// restorePath, after checking the sha256 sidecar and verifying the bundle.
-func restoreBackup(ctx context.Context, backupDir, restorePath string) error {
+// Restore writes the latest version of the backup at backupDir into dst, after
+// checking the sha256 sidecar. dst must not already exist.
+func Restore(ctx context.Context, backupDir, dst string) error {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
 		return err
 	}
 
 	// Refuse to write into an existing path, so a restore never clobbers data.
-	if _, err := os.Stat(restorePath); err == nil {
-		return fmt.Errorf("restore path already exists: %s", restorePath)
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("restore path already exists: %s", dst)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat restore path: %w", err)
 	}
@@ -181,13 +181,7 @@ func restoreBackup(ctx context.Context, backupDir, restorePath string) error {
 		return fmt.Errorf("sha256 mismatch for %s:\n  want %s\n  got  %s", rel, want, got)
 	}
 
-	if err := git.Clone(ctx, bundlePath, restorePath); err != nil {
-		return err
-	}
-
-	fmt.Printf("restored %s -> %s\n", rel, restorePath)
-
-	return nil
+	return git.Clone(ctx, bundlePath, dst)
 }
 
 // backupDirUsable reports whether dir is safe to use as a backup target: it
