@@ -324,18 +324,11 @@ func removeCmd(_ context.Context, args []string) error {
 		return err
 	}
 
-	source, target := e.Source, e.Target
-
+	// Config entry only; the backup data on the target is left in place. Silent
+	// on success.
 	cfg.Remove(e.ID)
 
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-
-	// Config entry only; the backup data on the target is left in place.
-	fmt.Printf("removed %s -> %s\n", source, target)
-
-	return nil
+	return cfg.Save()
 }
 
 func restoreCmd(ctx context.Context, args []string) error {
