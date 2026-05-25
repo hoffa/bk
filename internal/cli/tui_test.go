@@ -57,6 +57,26 @@ func TestModelRefreshAutoSync(t *testing.T) {
 	}
 }
 
+func TestModelSyncKey(t *testing.T) {
+	stale := status("/a", "/b", bk.StateUnsynced)
+	m := newModel(stale)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+
+	mm := updated.(tuiModel)
+	if mm.autoSync {
+		t.Error("pressing s should not enable auto-sync")
+	}
+
+	if !mm.syncing[entryKey(stale.Entry)] {
+		t.Error("pressing s should start syncing the stale entry")
+	}
+
+	if cmd == nil {
+		t.Error("expected sync command")
+	}
+}
+
 func TestModelToggleAutoSync(t *testing.T) {
 	stale := status("/a", "/b", bk.StateUnsynced)
 	m := newModel(stale)

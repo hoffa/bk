@@ -77,6 +77,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel() // stop any in-flight syncs
 
 			return m, tea.Quit
+		case "s":
+			// One-shot: sync every out-of-date connected entry now, without
+			// turning on continuous auto-sync.
+			return m, m.startSyncs()
 		case "a":
 			m.autoSync = !m.autoSync
 			if m.autoSync {
@@ -196,7 +200,7 @@ func (m tuiModel) statusBar(bodyLines int) string {
 	}
 
 	left := muted.Render("auto-sync: ") + mode
-	right := muted.Render("a: toggle auto-sync  q: quit")
+	right := muted.Render("s: sync  a: toggle auto-sync  q: quit")
 
 	// Measure visible width (Width ignores the color escapes) to size the gap so
 	// the help stays flush-right.

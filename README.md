@@ -68,8 +68,9 @@ back up). When the target is present its own state is authoritative.
 
 Or just run `bk` with no arguments for a live dashboard: a colored status dot
 and last sync time per backup, re-checking continuously, so plugging in a drive
-or adding an entry elsewhere shows up on its own. See [DESIGN.md](DESIGN.md) for
-the dot colors.
+or adding an entry elsewhere shows up on its own. Press `s` to sync the
+out-of-date backups once, `a` to toggle continuous auto-sync, `q` to quit. See
+[DESIGN.md](DESIGN.md) for the dot colors.
 
 By default it only *shows* status. Press `a` to toggle auto-sync, which keeps
 out-of-date backups synced automatically (turning their dots green); `q` quits.
