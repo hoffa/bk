@@ -21,15 +21,18 @@ func CheckRepo(ctx context.Context, path string) error {
 	return nil
 }
 
-// Sync backs up a single configured entry. On the first sync (empty ID) it
-// initializes the target with the keyring kr and records its id; afterwards it
-// verifies the target's id matches before syncing. A target that isn't present is
-// reported as ErrTargetAbsent (e.g. an unplugged drive), which callers typically
-// treat as a skip rather than a failure. Bundles are encrypted to the target's
-// own stored keyring, so every version in a target stays decryptable. It fills in
-// e.Backup (identity, refs, time) in place and reports whether a new version was
-// written.
+// Sync backs up a single configured entry. On the first sync it initializes the
+// target with the entry's ID and the keyring kr; afterwards it verifies the
+// target's id matches before syncing. A target that isn't present is reported as
+// ErrTargetAbsent (e.g. an unplugged drive), which callers typically treat as a
+// skip rather than a failure. Bundles are encrypted to the target's own stored
+// keyring, so every version in a target stays decryptable. It fills in e.Backup
+// (refs, time) in place and reports whether a new version was written.
 func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
+	if e.ID == "" {
+		return false, errors.New("missing entry id")
+	}
+
 	target, err := filepath.Abs(e.Target)
 	if err != nil {
 		return false, err
@@ -44,7 +47,7 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 			return false, err
 		}
 
-		if err := initBackup(target, kr); err != nil {
+		if err := initBackup(target, e.ID, kr); err != nil {
 			return false, err
 		}
 	} else if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
@@ -58,18 +61,21 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 		return false, fmt.Errorf("not a valid backup: %w", err)
 	}
 
-	if e.Backup == nil {
-		e.Backup = &Backup{ID: meta.ID}
-	} else if meta.ID != e.Backup.ID {
-		return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.Backup.ID, meta.ID)
+	if meta.ID != e.ID {
+		return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", e.ID, meta.ID)
 	}
 
 	// Encrypt to the target's own keyring (kr seeds a new target; an existing one
 	// keeps the keyring it was created with).
-	synced, err := syncBackup(ctx, e.Source, target, meta.Key)
+	synced, err := syncBackup(ctx, e.Source, target, e.ID, meta.Key)
 	if err != nil {
 		return false, err
 	}
+
+	if e.Backup == nil {
+		e.Backup = &Backup{}
+	}
+
 	// Cache the synced refs + time so currency and last-sync time are known while
 	// the target is absent.
 	if l, err := readLatest(target); err == nil {

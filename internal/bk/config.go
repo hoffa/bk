@@ -18,10 +18,11 @@ import (
 	"github.com/hoffa/bk/internal/util"
 )
 
-// Entry is one configured backup. ID is the entry's own stable handle, assigned
-// at Add and used to refer to it (e.g. bk rm). Source and Target are what you
-// declared. Backup is what we last learned from the target, cached for offline
-// verification and status; it's nil until the first sync.
+// Entry is one configured backup. ID is the stable backup identity, assigned at
+// Add, used to refer to it (e.g. bk rm), and written into the target sentinel.
+// Source and Target are what you declared. Backup is what we last learned from
+// the target, cached for offline verification and status; it's nil until the
+// first sync.
 type Entry struct {
 	ID     string
 	Source string
@@ -31,9 +32,8 @@ type Entry struct {
 
 // Backup mirrors what the config caches about a target between syncs so bk can
 // verify and show status while the target is absent. The target's own
-// BK_BACKUP.json / latest.json are authoritative; this is a regenerable cache.
+// latest.json is authoritative; this is a regenerable cache.
 type Backup struct {
-	ID          string    // the backup's identity, for trust-on-first-use
 	ContentHash string    // fingerprint of the source's content at the last sync
 	SyncedAt    time.Time // last sync time
 }

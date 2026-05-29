@@ -113,7 +113,7 @@ func Eval(ctx context.Context, e Entry) Status {
 		return s
 	}
 
-	if meta.ID != e.Backup.ID {
+	if meta.ID != e.ID {
 		s.State = StateError
 		return s
 	}

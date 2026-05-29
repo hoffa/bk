@@ -69,6 +69,7 @@ func TestE2E(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 	restore := filepath.Join(t.TempDir(), "restored")
+
 	var id string
 
 	t.Run("init ok", func(t *testing.T) {

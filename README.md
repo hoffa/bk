@@ -49,7 +49,7 @@ bk sync 1a2b3c
 ```
 
 `bk sync [<id>]` backs up every configured pair, or one pair when an id prefix
-is supplied. The first sync initializes the target and records its id; later
+is supplied. The first sync initializes the target with the entry id; later
 syncs verify that id, so a wrong or replaced target is never written to.
 Targets that aren't present (e.g. an unplugged drive) are skipped. Each sync
 appends a new, verified bundle; existing versions are never overwritten.
@@ -109,7 +109,6 @@ simplified form:
       "source": "/Users/me/code/my-repo",
       "target": "/Volumes/usb/my-repo",
       "backup": {
-        "id": "...",
         "content_hash": "...",
         "synced_at": "..."
       }
@@ -118,8 +117,9 @@ simplified form:
 }
 ```
 
-The entry id is assigned by `bk add`. The nested backup cache is filled on the
-first successful sync and refreshed after later syncs.
+The entry id is assigned by `bk add` and written into the target sentinel on the
+first successful sync. The nested backup cache is filled on the first successful
+sync and refreshed after later syncs.
 
 ## Layout
 
@@ -127,7 +127,7 @@ A backup is a plain directory using only appends and atomic overwrites:
 
 ```
 backup/
-  BK_BACKUP.json          sentinel + opaque id
+  BK_BACKUP.json          sentinel + entry id
   latest.json             current version + refs fingerprint (path, refs_hash, synced_at)
   versions/
     bk-<timestamp>.bundle.age

@@ -75,6 +75,28 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func TestConfigHelpers(t *testing.T) {
+	c := &Config{Sync: []Entry{{ID: "a"}, {ID: "b"}}}
+
+	c.Remove("a")
+
+	if len(c.Sync) != 1 || c.Sync[0].ID != "b" {
+		t.Fatalf("Remove left %+v, want only b", c.Sync)
+	}
+
+	if c.HasKey() {
+		t.Fatal("empty config should not have a key")
+	}
+
+	if err := c.SetPassword("pw"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !c.HasKey() {
+		t.Fatal("SetPassword should set a key")
+	}
+}
+
 func TestConfigPathDefaults(t *testing.T) {
 	t.Setenv("BK_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
@@ -100,15 +122,24 @@ func TestSyncEntry(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	e := Entry{Source: repo, Target: target}
+	e := Entry{ID: "entry-id", Source: repo, Target: target}
 
 	synced, err := Sync(ctx, &e, testKey)
 	if err != nil || !synced {
 		t.Fatalf("first sync synced=%v err=%v", synced, err)
 	}
 
-	if e.Backup == nil || e.Backup.ID == "" {
-		t.Fatal("first sync did not record the backup id")
+	if e.Backup == nil {
+		t.Fatal("first sync did not record the backup cache")
+	}
+
+	meta, err := loadBackupMeta(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if meta.ID != e.ID {
+		t.Fatalf("target id = %q, want entry id %q", meta.ID, e.ID)
 	}
 
 	if _, err := os.Stat(filepath.Join(target, latestFile)); err != nil {
@@ -133,18 +164,24 @@ func TestSyncEntry(t *testing.T) {
 	}
 }
 
+func TestSyncEntryMissingID(t *testing.T) {
+	if _, err := Sync(t.Context(), &Entry{}, testKey); err == nil || !strings.Contains(err.Error(), "missing entry id") {
+		t.Fatalf("want missing entry id, got %v", err)
+	}
+}
+
 func TestSyncEntryAbsent(t *testing.T) {
 	ctx := t.Context()
 	repo := initRepo(t)
 
 	// First sync with a missing parent (e.g. drive not mounted) -> absent.
-	e := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "nope", "backup")}
+	e := Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "nope", "backup")}
 	if _, err := Sync(ctx, &e, testKey); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
 
 	// id set but target missing -> absent.
-	e2 := Entry{Source: repo, Target: filepath.Join(t.TempDir(), "missing"), Backup: &Backup{ID: "x"}}
+	e2 := Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "missing"), Backup: &Backup{}}
 	if _, err := Sync(ctx, &e2, testKey); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
@@ -155,11 +192,11 @@ func TestSyncEntryIDMismatch(t *testing.T) {
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	if err := initBackup(target, testKey); err != nil {
+	if err := initBackup(target, "real-id", testKey); err != nil {
 		t.Fatal(err)
 	}
 
-	e := Entry{Source: repo, Target: target, Backup: &Backup{ID: "not-the-real-id"}}
+	e := Entry{ID: "not-the-real-id", Source: repo, Target: target, Backup: &Backup{}}
 	if _, err := Sync(ctx, &e, testKey); err == nil || errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want id-mismatch failure, got %v", err)
 	}
@@ -175,7 +212,7 @@ func TestSyncEntryNotABackup(t *testing.T) {
 	repo := initRepo(t)
 	target := t.TempDir() // exists but has no BK_BACKUP.json
 
-	e := Entry{Source: repo, Target: target, Backup: &Backup{ID: "x"}}
+	e := Entry{ID: "entry-id", Source: repo, Target: target, Backup: &Backup{}}
 	if _, err := Sync(ctx, &e, testKey); err == nil {
 		t.Fatal("expected failure for non-backup target")
 	}
@@ -185,8 +222,9 @@ func TestSyncBackupRestoreRoundTrip(t *testing.T) {
 	ctx := t.Context()
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
+	id := "entry-id"
 
-	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, id, testKey); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -195,8 +233,8 @@ func TestSyncBackupRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("load meta: %v", err)
 	}
 
-	if meta.ID == "" {
-		t.Fatal("BK_BACKUP.json has empty id")
+	if meta.ID != id {
+		t.Fatalf("BK_BACKUP.json id = %q, want %q", meta.ID, id)
 	}
 
 	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle.age"))
@@ -222,8 +260,9 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 	ctx := t.Context()
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
+	id := "entry-id"
 
-	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, id, testKey); err != nil {
 		t.Fatalf("sync 1: %v", err)
 	}
 
@@ -234,7 +273,7 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 
-	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, id, testKey); err != nil {
 		t.Fatalf("sync 2: %v", err)
 	}
 
@@ -245,6 +284,10 @@ func TestSyncBackupAppendsStableID(t *testing.T) {
 
 	if first.ID != second.ID {
 		t.Fatalf("id changed across syncs: %s -> %s", first.ID, second.ID)
+	}
+
+	if second.ID != id {
+		t.Fatalf("id = %q, want %q", second.ID, id)
 	}
 
 	bundles, _ := filepath.Glob(filepath.Join(backup, versionsDir, "*.bundle.age"))
@@ -271,8 +314,14 @@ func TestSyncBackupRefusesNonEmptyTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := syncBackup(t.Context(), repo, target, testKey); err == nil {
+	if _, err := syncBackup(t.Context(), repo, target, "entry-id", testKey); err == nil {
 		t.Fatal("expected sync to refuse a non-empty non-backup target")
+	}
+}
+
+func TestInitBackupMissingID(t *testing.T) {
+	if err := initBackup(t.TempDir(), "", testKey); err == nil || !strings.Contains(err.Error(), "missing entry id") {
+		t.Fatalf("want missing entry id, got %v", err)
 	}
 }
 
@@ -281,7 +330,7 @@ func TestRestoreShaMismatch(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, "entry-id", testKey); err != nil {
 		t.Fatal(err)
 	}
 
@@ -306,7 +355,7 @@ func TestRestoreExistingTarget(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 
-	if _, err := syncBackup(ctx, repo, backup, testKey); err != nil {
+	if _, err := syncBackup(ctx, repo, backup, "entry-id", testKey); err != nil {
 		t.Fatal(err)
 	}
 
@@ -325,7 +374,7 @@ func TestRestoreNotABackup(t *testing.T) {
 
 func TestRestoreNoVersions(t *testing.T) {
 	backup := filepath.Join(t.TempDir(), "backup")
-	if err := initBackup(backup, testKey); err != nil {
+	if err := initBackup(backup, "entry-id", testKey); err != nil {
 		t.Fatal(err)
 	}
 
@@ -341,7 +390,7 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := initBackup(dir, testKey); err == nil {
+	if err := initBackup(dir, "entry-id", testKey); err == nil {
 		t.Fatal("expected refusal to initialize a non-empty non-backup dir")
 	}
 
@@ -356,11 +405,11 @@ func TestInitBackupRefusesNonEmpty(t *testing.T) {
 
 func TestInitBackupEmptyAndAdopt(t *testing.T) {
 	dir := t.TempDir()
-	if err := initBackup(dir, testKey); err != nil {
+	if err := initBackup(dir, "entry-id", testKey); err != nil {
 		t.Fatalf("empty dir should initialize: %v", err)
 	}
 
-	if err := initBackup(dir, testKey); err != nil {
+	if err := initBackup(dir, "entry-id", testKey); err != nil {
 		t.Fatalf("re-init should adopt: %v", err)
 	}
 }
@@ -382,7 +431,7 @@ func TestEvalStates(t *testing.T) {
 	}
 
 	// Absent target with an id but no refs cache -> out of date (offline).
-	st := Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x"}})
+	st := Eval(ctx, Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{}})
 	if st.Present || st.State != StateStale {
 		t.Errorf("absent uncached = %q present=%v, want stale offline", st.State.Label(), st.Present)
 	}
@@ -395,7 +444,7 @@ func TestEvalStates(t *testing.T) {
 
 	when := time.Now().UTC()
 
-	st = Eval(ctx, Entry{Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ID: "x", ContentHash: rh, SyncedAt: when}})
+	st = Eval(ctx, Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "gone"), Backup: &Backup{ContentHash: rh, SyncedAt: when}})
 	if st.Present || st.State != StateSynced {
 		t.Errorf("absent cached-current = %q present=%v, want synced offline", st.State.Label(), st.Present)
 	}
@@ -405,7 +454,7 @@ func TestEvalStates(t *testing.T) {
 	}
 
 	// Synced after a sync, stale after a new commit.
-	e := Entry{Source: repo, Target: target}
+	e := Entry{ID: "entry-id", Source: repo, Target: target}
 	if _, err := Sync(ctx, &e, testKey); err != nil {
 		t.Fatal(err)
 	}
@@ -421,22 +470,46 @@ func TestEvalStates(t *testing.T) {
 	}
 }
 
+func TestStateHelpers(t *testing.T) {
+	cases := []struct {
+		state State
+		label string
+		sync  bool
+	}{
+		{StateChecking, "checking", false},
+		{StateSynced, "synced", false},
+		{StateStale, "out of date", true},
+		{StateUnsynced, "never synced", true},
+		{StateError, "error", false},
+	}
+
+	for _, c := range cases {
+		if got := c.state.Label(); got != c.label {
+			t.Errorf("Label(%d) = %q, want %q", c.state, got, c.label)
+		}
+
+		if got := c.state.NeedsSync(); got != c.sync {
+			t.Errorf("NeedsSync(%s) = %v, want %v", c.state.Label(), got, c.sync)
+		}
+	}
+}
+
 func TestEvalErrors(t *testing.T) {
 	ctx := t.Context()
 	repo := initRepo(t)
 
 	// id set but target has no BK_BACKUP.json.
-	if s := Eval(ctx, Entry{Source: repo, Target: t.TempDir(), Backup: &Backup{ID: "abc"}}); s.State != StateError {
+	if s := Eval(ctx, Entry{ID: "entry-id", Source: repo, Target: t.TempDir(), Backup: &Backup{}}); s.State != StateError {
 		t.Errorf("not-a-backup = %q, want error", s.State.Label())
 	}
 
 	// id set, valid backup, but a different id.
 	mismatch := filepath.Join(t.TempDir(), "b")
-	if err := initBackup(mismatch, testKey); err != nil {
+	if err := initBackup(mismatch, "real-id", testKey); err != nil {
 		t.Fatal(err)
 	}
 
-	if s := Eval(ctx, Entry{Source: repo, Target: mismatch, Backup: &Backup{ID: "not-the-real-id"}}); s.State != StateError {
+	if s := Eval(ctx, Entry{ID: "not-the-real-id", Source: repo, Target: mismatch, Backup: &Backup{}}); s.State != StateError {
 		t.Errorf("id-mismatch = %q, want error", s.State.Label())
 	}
 

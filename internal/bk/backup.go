@@ -3,6 +3,7 @@ package bk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ const (
 	encExt         = ".age" // suffix on an encrypted bundle
 )
 
-// backupMeta is the content of BK_BACKUP.json: a stable opaque id (a sentinel
+// backupMeta is the content of BK_BACKUP.json: the stable entry id (a sentinel
 // for auto-discovery of backups on mounted volumes) and the keyring, so the
 // backup is self-describing -- a restore needs only the target and the password,
 // not the source machine's config.
@@ -70,14 +71,23 @@ func writeLatest(backupDir string, l latestMeta) error {
 // point at the new bundle. The backup is initialized on first sync. If the
 // repo's refs are unchanged since the last sync, it does nothing.
 // It reports whether a new version was written (false means already up to date).
-func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyring) (bool, error) {
+func syncBackup(ctx context.Context, repoPath, backupDir, id string, kr crypt.Keyring) (bool, error) {
 	backupDir, err := filepath.Abs(backupDir)
 	if err != nil {
 		return false, err
 	}
 
-	if err := initBackup(backupDir, kr); err != nil {
+	if err := initBackup(backupDir, id, kr); err != nil {
 		return false, err
+	}
+
+	meta, err := loadBackupMeta(backupDir)
+	if err != nil {
+		return false, fmt.Errorf("not a valid backup: %w", err)
+	}
+
+	if meta.ID != id {
+		return false, fmt.Errorf("id mismatch: expected %s, found %s (wrong target?)", id, meta.ID)
 	}
 
 	refsHash, err := git.RefsHash(ctx, repoPath)
@@ -90,10 +100,10 @@ func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyrin
 	}
 
 	// Sortable, nanosecond-resolution UTC name. Versions are append-only, so
-	// refuse to reuse a name already on disk rather than overwrite it. Syncs to a
-	// backup are serialized and the nanosecond stamp makes a real collision
-	// practically impossible, so an existing name means something is wrong --
-	// error rather than clobber a previous version.
+	// refuse to reuse a name already on disk rather than overwrite it. The
+	// nanosecond stamp makes a real collision practically impossible, so an
+	// existing name means something is wrong -- error rather than clobber a
+	// previous version.
 	base := fmt.Sprintf("bk-%s.bundle%s", time.Now().UTC().Format("20060102T150405.000000000Z"), encExt)
 	bundlePath := filepath.Join(backupDir, versionsDir, base)
 	tmpPlain := bundlePath + ".plain" // plaintext bundle, deleted before return
@@ -113,7 +123,7 @@ func syncBackup(ctx context.Context, repoPath, backupDir string, kr crypt.Keyrin
 		return false, err
 	}
 
-	if err := crypt.EncryptFile(tmpEnc, tmpPlain, kr.Public); err != nil {
+	if err := crypt.EncryptFile(tmpEnc, tmpPlain, meta.Key.Public); err != nil {
 		_ = os.Remove(tmpPlain)
 		_ = os.Remove(tmpEnc)
 
@@ -249,10 +259,14 @@ func backupDirUsable(dir string) (bool, error) {
 }
 
 // initBackup ensures backupDir is an initialized backup: it creates versions/
-// and, if BK_BACKUP.json is absent, writes one with a fresh id. An existing
+// and, if BK_BACKUP.json is absent, writes one with the entry id. An existing
 // sentinel is left untouched so the id is stable across syncs. It refuses to
 // write into a non-empty directory that isn't already a backup.
-func initBackup(dir string, kr crypt.Keyring) error {
+func initBackup(dir, id string, kr crypt.Keyring) error {
+	if id == "" {
+		return errors.New("missing entry id")
+	}
+
 	if ok, err := backupDirUsable(dir); err != nil {
 		return err
 	} else if !ok {
@@ -267,11 +281,6 @@ func initBackup(dir string, kr crypt.Keyring) error {
 	if _, err := os.Stat(sentinel); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	id, err := util.RandHex(16)
-	if err != nil {
 		return err
 	}
 
