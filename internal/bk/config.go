@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hoffa/bk/internal/crypt"
 	"github.com/hoffa/bk/internal/util"
 )
 
@@ -38,11 +37,9 @@ type Backup struct {
 	SyncedAt    time.Time // last sync time
 }
 
-// Config is the whole on-disk config: the set of configured backups plus the
-// encryption keyring (set on first add; backups are always encrypted to it).
+// Config is the whole on-disk config: the set of configured backups.
 type Config struct {
 	Sync []Entry
-	Key  crypt.Keyring
 }
 
 // ErrTargetAbsent means a target path does not exist, e.g. an unplugged drive.
@@ -144,24 +141,6 @@ func (c *Config) Remove(id string) {
 	}
 
 	c.Sync = kept
-}
-
-// HasKey reports whether the encryption keyring has been set up.
-func (c *Config) HasKey() bool {
-	return c.Key.Public != ""
-}
-
-// SetPassword creates the encryption keyring from password. Backups are then
-// encrypted to it; the password is needed only to restore.
-func (c *Config) SetPassword(password string) error {
-	kr, err := crypt.NewKeyring(password)
-	if err != nil {
-		return err
-	}
-
-	c.Key = kr
-
-	return nil
 }
 
 // ConfigPath resolves the global config location: BK_CONFIG overrides everything,

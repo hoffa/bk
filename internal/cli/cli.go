@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/hoffa/bk/internal/bk"
+	"github.com/hoffa/bk/internal/crypt"
 )
 
 // errUsage signals a usage error: the message has already been printed and the
@@ -42,7 +43,6 @@ type command struct {
 // transitively reference the table via fixedArgs.
 func commands() []command {
 	return []command{
-		{"init", "[--force]", "set the backup password (run once)", initCmd},
 		{"add", "<repo-path> <backup-dir>", "register a repo -> backup-dir pair", addCmd},
 		{"sync", "[<id>]", "back up configured repos, or one by id prefix", syncCmd},
 		{"status", "", "show the state of every backup", statusCmd},
@@ -145,50 +145,6 @@ func readNewPassword() (string, error) {
 	return pw, nil
 }
 
-func initCmd(_ context.Context, args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	force := fs.Bool("force", false, "replace an existing key (existing backups become unreadable)")
-	_ = fs.Parse(args) // flag.ExitOnError handles parse errors
-
-	if fs.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: bk init [--force]")
-		return errUsage
-	}
-
-	cfg, err := bk.Load()
-	if err != nil {
-		return err
-	}
-
-	if cfg.HasKey() && !*force {
-		return errors.New("already initialized (use --force to set a new password, abandoning existing backups)")
-	}
-
-	if cfg.HasKey() {
-		fmt.Fprintln(os.Stderr, "WARNING: --force creates a NEW key. Existing backups stay locked to the")
-		fmt.Fprintln(os.Stderr, "OLD password and bk will not use them; wipe or replace their targets to")
-		fmt.Fprintln(os.Stderr, "back up again under the new password. This cannot be undone.")
-	}
-
-	pw, err := readNewPassword()
-	if err != nil {
-		return err
-	}
-
-	if err := cfg.SetPassword(pw); err != nil {
-		return err
-	}
-
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-
-	fmt.Println("Initialized. Backups are encrypted with this password.")
-	fmt.Println("Save it somewhere safe -- if you lose it, backups cannot be recovered.")
-
-	return nil
-}
-
 func addCmd(ctx context.Context, args []string) error {
 	a, err := fixedArgs("add", args, 2)
 	if err != nil {
@@ -213,10 +169,6 @@ func addCmd(ctx context.Context, args []string) error {
 	cfg, err := bk.Load()
 	if err != nil {
 		return err
-	}
-
-	if !cfg.HasKey() {
-		return errors.New("no backup password set; run 'bk init' first")
 	}
 
 	// Pure config: the target is initialized on first sync, so it need not be
@@ -278,9 +230,24 @@ func syncCmd(ctx context.Context, args []string) error {
 
 	oneLine := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 
+	var password *string
+
+	newKeyring := func() (crypt.Keyring, error) {
+		if password == nil {
+			pw, err := readNewPassword()
+			if err != nil {
+				return crypt.Keyring{}, err
+			}
+
+			password = &pw
+		}
+
+		return crypt.NewKeyring(*password)
+	}
+
 	for _, e := range entries {
 		firstSync := e.Backup == nil
-		synced, err := bk.Sync(ctx, e, cfg.Key)
+		synced, err := bk.Sync(ctx, e, newKeyring)
 
 		var status, msg string
 

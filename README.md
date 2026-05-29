@@ -21,14 +21,6 @@ Or download a [prebuilt binary](https://github.com/hoffa/bk/releases/latest).
 
 ## Usage
 
-Initialize the backup password:
-
-```sh
-bk init
-```
-
-Re-running `bk init` refuses to replace the key unless you pass `--force`.
-
 Register a repository and a backup directory. This only edits the config;
 the target doesn't need to exist yet (e.g. an unplugged drive):
 
@@ -51,8 +43,11 @@ bk sync 1a2b3c
 `bk sync [<id>]` backs up every configured pair, or one pair when an id prefix
 is supplied. The first sync initializes the target with the entry id; later
 syncs verify that id, so a wrong or replaced target is never written to.
-Targets that aren't present (e.g. an unplugged drive) are skipped. Each sync
-appends a new, verified bundle; existing versions are never overwritten.
+The first sync of a target also creates that target's encryption keyring from
+your password and stores it in `BK_BACKUP.json`; later syncs reuse the target's
+stored keyring. Targets that aren't present (e.g. an unplugged drive) are
+skipped. Each sync appends a new, verified bundle; existing versions are never
+overwritten.
 
 It prints one headerless, tab-separated record per pair: `id`, status, and a
 message. The status uses the same vocabulary as `bk status` — a reached target
@@ -118,8 +113,9 @@ simplified form:
 ```
 
 The entry id is assigned by `bk add` and written into the target sentinel on the
-first successful sync. The nested backup cache is filled on the first successful
-sync and refreshed after later syncs.
+first successful sync. Encryption key material lives in the backup target, not
+the config. The nested backup cache is filled on the first successful sync and
+refreshed after later syncs.
 
 ## Layout
 
@@ -127,7 +123,7 @@ A backup is a plain directory using only appends and atomic overwrites:
 
 ```
 backup/
-  BK_BACKUP.json          sentinel + entry id
+  BK_BACKUP.json          sentinel + entry id + encrypted keyring
   latest.json             current version + refs fingerprint (path, refs_hash, synced_at)
   versions/
     bk-<timestamp>.bundle.age

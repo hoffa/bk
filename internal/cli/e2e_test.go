@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 	// Safety net: keep all tests off the real ~/.config/bk; individual tests
 	// may still override BK_CONFIG via t.Setenv.
 	_ = os.Setenv("BK_CONFIG", filepath.Join(dir, "config.json"))
-	_ = os.Setenv("BK_PASSWORD", "test-password") // non-interactive add/restore
+	_ = os.Setenv("BK_PASSWORD", "test-password") // non-interactive sync/restore
 
 	build := exec.Command("go", "build", "-o", bkBin, "github.com/hoffa/bk")
 
@@ -71,12 +71,6 @@ func TestE2E(t *testing.T) {
 	restore := filepath.Join(t.TempDir(), "restored")
 
 	var id string
-
-	t.Run("init ok", func(t *testing.T) {
-		if out, code := runBin(t, "init"); code != 0 {
-			t.Fatalf("exit %d, want 0\n%s", code, out)
-		}
-	})
 
 	t.Run("add ok", func(t *testing.T) {
 		out, code := runBin(t, "add", repo, backup)

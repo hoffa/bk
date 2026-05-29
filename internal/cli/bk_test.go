@@ -63,21 +63,7 @@ func useTempConfig(t *testing.T) string {
 
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("BK_CONFIG", path)
-	t.Setenv("BK_PASSWORD", "test-password") // non-interactive restore
-
-	// Initialize the keyring up front, as `bk init` would.
-	cfg, err := bk.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := cfg.SetPassword("test-password"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := cfg.Save(); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("BK_PASSWORD", "test-password") // non-interactive sync/restore
 
 	return path
 }
@@ -119,66 +105,15 @@ func TestAddRejectsNonRepo(t *testing.T) {
 	}
 }
 
-func TestInit(t *testing.T) {
+func TestAddWithoutInit(t *testing.T) {
 	t.Setenv("BK_CONFIG", filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv("BK_PASSWORD", "pw")
 
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
 
-	// add before init fails (the source is a valid repo, so it's the keyring).
-	if err := run(t.Context(), []string{"add", repo, target}); err == nil {
-		t.Fatal("add before init should fail")
-	}
-
-	if err := run(t.Context(), []string{"init"}); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-
-	if cfg, _ := bk.Load(); !cfg.HasKey() {
-		t.Fatal("init did not set a keyring")
-	}
-
-	// Re-init errors.
-	if err := run(t.Context(), []string{"init"}); err == nil {
-		t.Fatal("re-init should fail")
-	}
-
-	// add now works.
 	if err := run(t.Context(), []string{"add", repo, target}); err != nil {
-		t.Fatalf("add after init: %v", err)
-	}
-}
-
-func TestInitForce(t *testing.T) {
-	t.Setenv("BK_CONFIG", filepath.Join(t.TempDir(), "config.json"))
-	t.Setenv("BK_PASSWORD", "pw1")
-
-	if err := run(t.Context(), []string{"init"}); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := bk.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	old := cfg.Key.Public
-
-	// Re-init without --force is refused.
-	if err := run(t.Context(), []string{"init"}); err == nil {
-		t.Fatal("re-init without --force should fail")
-	}
-
-	// With --force it sets a new key.
-	t.Setenv("BK_PASSWORD", "pw2")
-
-	if err := run(t.Context(), []string{"init", "--force"}); err != nil {
-		t.Fatalf("init --force: %v", err)
-	}
-
-	if cfg2, _ := bk.Load(); cfg2.Key.Public == old {
-		t.Error("--force should generate a new key")
+		t.Fatalf("add: %v", err)
 	}
 }
 

@@ -22,13 +22,14 @@ func CheckRepo(ctx context.Context, path string) error {
 }
 
 // Sync backs up a single configured entry. On the first sync it initializes the
-// target with the entry's ID and the keyring kr; afterwards it verifies the
-// target's id matches before syncing. A target that isn't present is reported as
-// ErrTargetAbsent (e.g. an unplugged drive), which callers typically treat as a
-// skip rather than a failure. Bundles are encrypted to the target's own stored
-// keyring, so every version in a target stays decryptable. It fills in e.Backup
-// (refs, time) in place and reports whether a new version was written.
-func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
+// target with the entry's ID and a keyring from newKeyring; afterwards it
+// verifies the target's id matches before syncing. A target that isn't present
+// is reported as ErrTargetAbsent (e.g. an unplugged drive), which callers
+// typically treat as a skip rather than a failure. Bundles are encrypted to the
+// target's own stored keyring, so every version in a target stays decryptable.
+// It fills in e.Backup (refs, time) in place and reports whether a new version
+// was written.
+func Sync(ctx context.Context, e *Entry, newKeyring func() (crypt.Keyring, error)) (bool, error) {
 	if e.ID == "" {
 		return false, errors.New("missing entry id")
 	}
@@ -44,6 +45,11 @@ func Sync(ctx context.Context, e *Entry, kr crypt.Keyring) (bool, error) {
 		if _, err := os.Stat(filepath.Dir(target)); errors.Is(err, os.ErrNotExist) {
 			return false, ErrTargetAbsent
 		} else if err != nil {
+			return false, err
+		}
+
+		kr, err := newKeyring()
+		if err != nil {
 			return false, err
 		}
 

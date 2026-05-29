@@ -83,18 +83,6 @@ func TestConfigHelpers(t *testing.T) {
 	if len(c.Sync) != 1 || c.Sync[0].ID != "b" {
 		t.Fatalf("Remove left %+v, want only b", c.Sync)
 	}
-
-	if c.HasKey() {
-		t.Fatal("empty config should not have a key")
-	}
-
-	if err := c.SetPassword("pw"); err != nil {
-		t.Fatal(err)
-	}
-
-	if !c.HasKey() {
-		t.Fatal("SetPassword should set a key")
-	}
 }
 
 func TestConfigPathDefaults(t *testing.T) {
@@ -124,7 +112,7 @@ func TestSyncEntry(t *testing.T) {
 
 	e := Entry{ID: "entry-id", Source: repo, Target: target}
 
-	synced, err := Sync(ctx, &e, testKey)
+	synced, err := Sync(ctx, &e, testKeyring)
 	if err != nil || !synced {
 		t.Fatalf("first sync synced=%v err=%v", synced, err)
 	}
@@ -147,14 +135,14 @@ func TestSyncEntry(t *testing.T) {
 	}
 
 	// Unchanged repo -> no new version.
-	if synced, err := Sync(ctx, &e, testKey); err != nil || synced {
+	if synced, err := Sync(ctx, &e, testKeyring); err != nil || synced {
 		t.Fatalf("unchanged sync synced=%v err=%v", synced, err)
 	}
 
 	// New commit -> append a version.
 	mustRun(t, repo, "git", "commit", "--allow-empty", "-qm", "second")
 
-	if synced, err := Sync(ctx, &e, testKey); err != nil || !synced {
+	if synced, err := Sync(ctx, &e, testKeyring); err != nil || !synced {
 		t.Fatalf("post-commit sync synced=%v err=%v", synced, err)
 	}
 
@@ -165,7 +153,7 @@ func TestSyncEntry(t *testing.T) {
 }
 
 func TestSyncEntryMissingID(t *testing.T) {
-	if _, err := Sync(t.Context(), &Entry{}, testKey); err == nil || !strings.Contains(err.Error(), "missing entry id") {
+	if _, err := Sync(t.Context(), &Entry{}, testKeyring); err == nil || !strings.Contains(err.Error(), "missing entry id") {
 		t.Fatalf("want missing entry id, got %v", err)
 	}
 }
@@ -176,13 +164,13 @@ func TestSyncEntryAbsent(t *testing.T) {
 
 	// First sync with a missing parent (e.g. drive not mounted) -> absent.
 	e := Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "nope", "backup")}
-	if _, err := Sync(ctx, &e, testKey); !errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e, testKeyring); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
 
 	// id set but target missing -> absent.
 	e2 := Entry{ID: "entry-id", Source: repo, Target: filepath.Join(t.TempDir(), "missing"), Backup: &Backup{}}
-	if _, err := Sync(ctx, &e2, testKey); !errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e2, testKeyring); !errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want ErrTargetAbsent, got %v", err)
 	}
 }
@@ -197,7 +185,7 @@ func TestSyncEntryIDMismatch(t *testing.T) {
 	}
 
 	e := Entry{ID: "not-the-real-id", Source: repo, Target: target, Backup: &Backup{}}
-	if _, err := Sync(ctx, &e, testKey); err == nil || errors.Is(err, ErrTargetAbsent) {
+	if _, err := Sync(ctx, &e, testKeyring); err == nil || errors.Is(err, ErrTargetAbsent) {
 		t.Fatalf("want id-mismatch failure, got %v", err)
 	}
 
@@ -213,7 +201,7 @@ func TestSyncEntryNotABackup(t *testing.T) {
 	target := t.TempDir() // exists but has no BK_BACKUP.json
 
 	e := Entry{ID: "entry-id", Source: repo, Target: target, Backup: &Backup{}}
-	if _, err := Sync(ctx, &e, testKey); err == nil {
+	if _, err := Sync(ctx, &e, testKeyring); err == nil {
 		t.Fatal("expected failure for non-backup target")
 	}
 }
@@ -455,7 +443,7 @@ func TestEvalStates(t *testing.T) {
 
 	// Synced after a sync, stale after a new commit.
 	e := Entry{ID: "entry-id", Source: repo, Target: target}
-	if _, err := Sync(ctx, &e, testKey); err != nil {
+	if _, err := Sync(ctx, &e, testKeyring); err != nil {
 		t.Fatal(err)
 	}
 

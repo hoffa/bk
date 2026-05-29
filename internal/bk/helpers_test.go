@@ -14,6 +14,10 @@ const testPassword = "test-password"
 // testKey is the keyring used across bk tests (generated once).
 var testKey, _ = crypt.NewKeyring(testPassword)
 
+func testKeyring() (crypt.Keyring, error) {
+	return testKey, nil
+}
+
 // mustRun executes a command in dir and fails the test on error.
 func mustRun(t *testing.T, dir, name string, args ...string) {
 	t.Helper()
