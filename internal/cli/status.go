@@ -10,8 +10,7 @@ import (
 )
 
 // evalAll loads the config and evaluates every entry. It's the front-end's
-// convenience over the core's per-entry bk.Eval, used by `bk status` and the
-// dashboard.
+// convenience over the core's per-entry bk.Eval, used by `bk status`.
 func evalAll(ctx context.Context) ([]bk.Status, error) {
 	cfg, err := bk.Load()
 	if err != nil {

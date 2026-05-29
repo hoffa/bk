@@ -1,6 +1,6 @@
 // Command bk makes versioned, verifiable backups of git repositories using git
 // bundles. It registers repo -> backup-dir pairs in a global config, syncs them
-// (skipping unchanged repos), and shows their currency in a live dashboard.
+// (skipping unchanged repos), and reports their currency as scriptable TSV.
 package main
 
 import (

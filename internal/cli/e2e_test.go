@@ -69,6 +69,7 @@ func TestE2E(t *testing.T) {
 	repo := initRepo(t)
 	backup := filepath.Join(t.TempDir(), "backup")
 	restore := filepath.Join(t.TempDir(), "restored")
+	var id string
 
 	t.Run("init ok", func(t *testing.T) {
 		if out, code := runBin(t, "init"); code != 0 {
@@ -77,13 +78,19 @@ func TestE2E(t *testing.T) {
 	})
 
 	t.Run("add ok", func(t *testing.T) {
-		if out, code := runBin(t, "add", repo, backup); code != 0 {
+		out, code := runBin(t, "add", repo, backup)
+		if code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)
+		}
+
+		id = strings.TrimSpace(out)
+		if id == "" {
+			t.Fatal("add did not print an id")
 		}
 	})
 
-	t.Run("sync ok", func(t *testing.T) {
-		if out, code := runBin(t, "sync"); code != 0 {
+	t.Run("sync by id ok", func(t *testing.T) {
+		if out, code := runBin(t, "sync", id[:6]); code != 0 {
 			t.Fatalf("exit %d, want 0\n%s", code, out)
 		}
 	})
@@ -109,14 +116,14 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("no args runs dashboard", func(t *testing.T) {
+	t.Run("no args is usage", func(t *testing.T) {
 		out, code := runBin(t)
-		if code != 0 {
-			t.Fatalf("exit %d, want 0\n%s", code, out)
+		if code != 2 {
+			t.Fatalf("exit %d, want 2\n%s", code, out)
 		}
 
-		if !strings.Contains(out, backup) {
-			t.Fatalf("dashboard missing target:\n%s", out)
+		if !strings.Contains(out, "usage: bk") {
+			t.Fatalf("usage missing:\n%s", out)
 		}
 	})
 
@@ -126,8 +133,8 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("sync with args is usage", func(t *testing.T) {
-		if _, code := runBin(t, "sync", repo); code != 2 {
+	t.Run("sync with too many args is usage", func(t *testing.T) {
+		if _, code := runBin(t, "sync", "a", "b"); code != 2 {
 			t.Fatalf("exit %d, want 2", code)
 		}
 	})

@@ -56,3 +56,24 @@ func TestPrintStatus(t *testing.T) {
 		t.Errorf("unexpected column order:\n%s", out)
 	}
 }
+
+func TestStatusCode(t *testing.T) {
+	cases := []struct {
+		s       bk.State
+		present bool
+		want    string
+	}{
+		{bk.StateSynced, true, "SYNCED_ONLINE"},
+		{bk.StateSynced, false, "SYNCED_OFFLINE"},
+		{bk.StateStale, true, "STALE_ONLINE"},
+		{bk.StateStale, false, "STALE_OFFLINE"},
+		{bk.StateUnsynced, true, "NEW"},
+		{bk.StateError, true, "ERROR"},
+	}
+
+	for _, c := range cases {
+		if got := statusCode(c.s, c.present); got != c.want {
+			t.Errorf("statusCode(%s, present=%v) = %q, want %q", c.s.Label(), c.present, got, c.want)
+		}
+	}
+}

@@ -1,6 +1,6 @@
-// Package cli is the bk command-line and dashboard front-end. It parses
-// arguments, drives the core (internal/bk) per entry, and renders results. main
-// is a thin shell over Main.
+// Package cli is the bk command-line front-end. It parses arguments, drives the
+// core (internal/bk) per entry, and renders scriptable output. main is a thin
+// shell over Main.
 package cli
 
 import (
@@ -8,15 +8,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image/color"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 
-	"charm.land/lipgloss/v2"
 	"golang.org/x/term"
 
 	"github.com/hoffa/bk/internal/bk"
@@ -47,9 +44,9 @@ func commands() []command {
 	return []command{
 		{"init", "[--force]", "set the backup password (run once)", initCmd},
 		{"add", "<repo-path> <backup-dir>", "register a repo -> backup-dir pair", addCmd},
-		{"sync", "", "back up every configured repo", syncCmd},
+		{"sync", "[<id>]", "back up configured repos, or one by id prefix", syncCmd},
 		{"status", "", "show the state of every backup", statusCmd},
-		{"remove", "<id>", "remove a backup from the config (id from 'bk status')", removeCmd},
+		{"rm", "[<id>]", "remove a backup from the config (id from 'bk status')", rmCmd},
 		{"restore", "<backup-dir> <restore-path>", "restore a backup's latest", restoreCmd},
 	}
 }
@@ -76,6 +73,23 @@ func fixedArgs(name string, raw []string, n int) ([]string, error) {
 	return fs.Args(), nil
 }
 
+// optionalID parses a command that accepts zero or one id prefix.
+func optionalID(name string, raw []string) (string, error) {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	_ = fs.Parse(raw) // flag.ExitOnError handles parse errors
+
+	if fs.NArg() > 1 {
+		fmt.Fprintf(os.Stderr, "usage: bk %s\n", usageLine(name))
+		return "", errUsage
+	}
+
+	if fs.NArg() == 0 {
+		return "", nil
+	}
+
+	return fs.Arg(0), nil
+}
+
 // usageLine returns "<name> <args>" for a command, the single source of its hint.
 func usageLine(name string) string {
 	for _, c := range commands() {
@@ -85,20 +99,6 @@ func usageLine(name string) string {
 	}
 
 	return name
-}
-
-// colorEnabled reports whether to emit color to w (a terminal, NO_COLOR unset).
-func colorEnabled(w io.Writer) bool {
-	return os.Getenv("NO_COLOR") == "" && isTerminal(w)
-}
-
-// paint colors s for w when color is enabled, otherwise returns it unchanged.
-func paint(w io.Writer, c color.Color, s string) string {
-	if !colorEnabled(w) {
-		return s
-	}
-
-	return lipgloss.NewStyle().Foreground(c).Render(s)
 }
 
 // readPassword returns the backup password from $BK_PASSWORD (handy for scripts
@@ -165,7 +165,7 @@ func initCmd(_ context.Context, args []string) error {
 	}
 
 	if cfg.HasKey() {
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, lipgloss.Yellow, "WARNING:")+" --force creates a NEW key. Existing backups stay locked to the")
+		fmt.Fprintln(os.Stderr, "WARNING: --force creates a NEW key. Existing backups stay locked to the")
 		fmt.Fprintln(os.Stderr, "OLD password and bk will not use them; wipe or replace their targets to")
 		fmt.Fprintln(os.Stderr, "back up again under the new password. This cannot be undone.")
 	}
@@ -236,7 +236,8 @@ func addCmd(ctx context.Context, args []string) error {
 }
 
 func syncCmd(ctx context.Context, args []string) error {
-	if _, err := fixedArgs("sync", args, 0); err != nil {
+	id, err := optionalID("sync", args)
+	if err != nil {
 		return err
 	}
 
@@ -248,6 +249,20 @@ func syncCmd(ctx context.Context, args []string) error {
 	if len(cfg.Sync) == 0 {
 		path, _ := bk.ConfigPath()
 		return fmt.Errorf("no sync entries in %s; add one with: bk add <repo> <backup-dir>", path)
+	}
+
+	entries := make([]*bk.Entry, 0, len(cfg.Sync))
+	if id != "" {
+		e, err := cfg.Match(id)
+		if err != nil {
+			return err
+		}
+
+		entries = append(entries, e)
+	} else {
+		for i := range cfg.Sync {
+			entries = append(entries, &cfg.Sync[i])
+		}
 	}
 
 	// Sync each entry, emitting "<id>\t<status>\t<msg>" TSV like `bk status` (the
@@ -263,9 +278,7 @@ func syncCmd(ctx context.Context, args []string) error {
 
 	oneLine := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 
-	for i := range cfg.Sync {
-		e := &cfg.Sync[i]
-
+	for _, e := range entries {
 		firstSync := e.Backup == nil
 		synced, err := bk.Sync(ctx, e, cfg.Key)
 
@@ -322,8 +335,8 @@ func statusCmd(ctx context.Context, args []string) error {
 	return printStatus(os.Stdout, statuses)
 }
 
-func removeCmd(_ context.Context, args []string) error {
-	a, err := fixedArgs("remove", args, 1)
+func rmCmd(_ context.Context, args []string) error {
+	id, err := optionalID("rm", args)
 	if err != nil {
 		return err
 	}
@@ -333,7 +346,18 @@ func removeCmd(_ context.Context, args []string) error {
 		return err
 	}
 
-	e, err := cfg.Match(a[0])
+	if id == "" {
+		switch len(cfg.Sync) {
+		case 0:
+			return errors.New("no backups configured")
+		case 1:
+			id = cfg.Sync[0].ID
+		default:
+			return errors.New("more than one backup configured; pass an id from 'bk status'")
+		}
+	}
+
+	e, err := cfg.Match(id)
 	if err != nil {
 		return err
 	}
@@ -369,7 +393,8 @@ func restoreCmd(ctx context.Context, args []string) error {
 // already printed.
 func run(ctx context.Context, args []string) error {
 	if len(args) < 1 {
-		return dashboard(ctx, os.Stdout)
+		usage()
+		return errUsage
 	}
 
 	name, rest := args[0], args[1:]
@@ -399,7 +424,7 @@ func Main(args []string) int {
 	case errors.Is(err, errReported):
 		return 1
 	default:
-		fmt.Fprintln(os.Stderr, paint(os.Stderr, lipgloss.Red, "error:"), err)
+		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}
 }

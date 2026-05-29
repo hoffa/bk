@@ -91,8 +91,13 @@ func TestRunAddSyncRestore(t *testing.T) {
 		t.Fatalf("run add: %v", err)
 	}
 
-	if err := run(t.Context(), []string{"sync"}); err != nil {
-		t.Fatalf("run sync: %v", err)
+	cfg, err := bk.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run(t.Context(), []string{"sync", cfg.Sync[0].ID[:6]}); err != nil {
+		t.Fatalf("run sync by id: %v", err)
 	}
 
 	restore := filepath.Join(t.TempDir(), "restored")
@@ -177,7 +182,7 @@ func TestInitForce(t *testing.T) {
 	}
 }
 
-func TestRunRemove(t *testing.T) {
+func TestRunRm(t *testing.T) {
 	useTempConfig(t)
 	repo := initRepo(t)
 	target := filepath.Join(t.TempDir(), "backup")
@@ -192,8 +197,21 @@ func TestRunRemove(t *testing.T) {
 	}
 
 	// Remove by an id prefix.
-	if err := run(t.Context(), []string{"remove", cfg.Sync[0].ID[:6]}); err != nil {
-		t.Fatalf("remove: %v", err)
+	if err := run(t.Context(), []string{"rm", cfg.Sync[0].ID[:6]}); err != nil {
+		t.Fatalf("rm: %v", err)
+	}
+
+	if cfg, _ := bk.Load(); len(cfg.Sync) != 0 {
+		t.Fatalf("expected entry removed, got %+v", cfg.Sync)
+	}
+
+	if err := run(t.Context(), []string{"add", repo, target}); err != nil {
+		t.Fatal(err)
+	}
+
+	// With only one configured backup, rm without an id removes it.
+	if err := run(t.Context(), []string{"rm"}); err != nil {
+		t.Fatalf("rm without id: %v", err)
 	}
 
 	if cfg, _ := bk.Load(); len(cfg.Sync) != 0 {
@@ -201,7 +219,7 @@ func TestRunRemove(t *testing.T) {
 	}
 
 	// Unknown id errors.
-	if err := run(t.Context(), []string{"remove", "nope"}); err == nil {
+	if err := run(t.Context(), []string{"rm", "nope"}); err == nil {
 		t.Fatal("expected error removing unknown id")
 	}
 }
@@ -218,9 +236,10 @@ func TestRunSyncNoEntries(t *testing.T) {
 func TestRunUsageErrors(t *testing.T) {
 	cases := [][]string{
 		{"bogus"},               // unknown command
-		{"sync", "a"},           // too few args
+		{},                      // no command
 		{"restore", "a"},        // too few args
 		{"sync", "a", "b", "c"}, // too many args
+		{"rm", "a", "b"},        // too many args
 	}
 	for _, args := range cases {
 		if err := run(t.Context(), args); !errors.Is(err, errUsage) {
