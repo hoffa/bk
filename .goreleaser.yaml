@@ -11,11 +11,11 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/hoffa/bk
     description: Versioned git repository backups using append-only bundles
-    url:
-      verified: github.com/hoffa/bk
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bk"]
-          end
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+              args:  ["-dr", "com.apple.quarantine", "{{ .ProjectName }}"],
+              chdir: "."
+        end
+      end
